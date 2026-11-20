@@ -14,10 +14,14 @@ export APP_DOMAIN ?= localhost:5173
 export LOG_FORMAT ?= text
 export SECRETS_KEY ?= 0000000000000000000000000000000000000000000000000000000000000000
 export FILES_DIR ?= $(CURDIR)/.data/files
-export MQTT_PLAIN_PORT ?= 1883        # dev only: plain MQTT for the simulator on localhost
+# Comments go on their own lines: make keeps the spaces before a trailing comment as part of the value.
+# MQTT_PLAIN_PORT: dev only, plain MQTT for the simulator on localhost
+export MQTT_PLAIN_PORT ?= 1883
 export MQTT_PORT ?= 8883
-export SMS_PROVIDER ?= stub           # OTP codes are logged locally, never sent
-export FCM_PROJECT_ID ?=              # empty = pushes are logged, not sent
+# SMS_PROVIDER=stub: OTP codes are logged locally, never sent
+export SMS_PROVIDER ?= stub
+# FCM_PROJECT_ID empty: pushes are logged, not sent
+export FCM_PROJECT_ID ?=
 export DB_OWNER_PASSWORD ?= $(DEV_PW)
 
 SQLC_VERSION := v1.31.1

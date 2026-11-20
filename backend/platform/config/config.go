@@ -45,6 +45,10 @@ type Base struct {
 	SentryDSN   Secret     `env:"SENTRY_DSN"`                     // empty = Sentry off
 }
 
+// BaseConfig returns the shared settings. A config struct that embeds Base gets it too, which is how the app
+// package reads them without knowing the binary's own struct.
+func (b Base) BaseConfig() Base { return b }
+
 // One binary (`schoolfleet serve --mode=api|worker|all`) plus the migrator (docs/02 A4).
 var services = map[string]bool{"schoolfleet": true, "migrate": true}
 
@@ -66,18 +70,20 @@ func (b Base) Validate() error {
 	if b.LogFormat != "json" && b.LogFormat != "text" {
 		errs = append(errs, fmt.Errorf("LOG_FORMAT must be json or text, got %q", b.LogFormat))
 	}
-	if err := checkDatabaseURL(b.DatabaseURL, b.AppEnv); err != nil {
+	if err := CheckDatabaseURL("DATABASE_URL", b.DatabaseURL, b.AppEnv); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }
 
-// checkDatabaseURL never includes the URL (or url.Parse's error, which quotes it) in its errors: the URL
-// contains the database password.
-func checkDatabaseURL(s Secret, appEnv Env) error {
+// CheckDatabaseURL validates a Postgres URL held in the environment variable `name`: it must be postgres://, and
+// anything that leaves the private Docker network must use TLS. A binary with a second database URL calls it
+// from its own Validate. It never includes the URL (or url.Parse's error, which
+// quotes it) in its errors: the URL contains the database password.
+func CheckDatabaseURL(name string, s Secret, appEnv Env) error {
 	u, err := url.Parse(s.Reveal())
 	if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") || u.Host == "" {
-		return errors.New("DATABASE_URL must be a postgres:// URL (value not shown: it contains a password)")
+		return fmt.Errorf("%s must be a postgres:// URL (value not shown: it contains a password)", name)
 	}
 	if appEnv == EnvLocal || localHosts[u.Hostname()] {
 		return nil
@@ -87,7 +93,7 @@ func checkDatabaseURL(s Secret, appEnv Env) error {
 	case "require", "verify-ca", "verify-full":
 		return nil
 	default:
-		return fmt.Errorf("DATABASE_URL must set sslmode=require, verify-ca or verify-full when APP_ENV=%s", appEnv)
+		return fmt.Errorf("%s must set sslmode=require, verify-ca or verify-full when APP_ENV=%s", name, appEnv)
 	}
 }
 

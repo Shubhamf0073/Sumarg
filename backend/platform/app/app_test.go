@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/config"
+	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/httpx"
 )
 
 func baseCfg(name string) func() (config.Base, error) {
@@ -38,8 +40,11 @@ func freeAddr(t *testing.T) string {
 	return addr
 }
 
-func testService() Service {
-	return Service{
+// svc is the service type the tests use: a binary with no settings beyond config.Base.
+type svc = Service[config.Base]
+
+func testService() svc {
+	return svc{
 		Name: "schoolfleet", PublicAddr: "127.0.0.1:0", InternalAddr: "127.0.0.1:0",
 		Modes: []string{ModeAPI, ModeWorker, ModeAll},
 		Public: func(r chi.Router) {
@@ -69,7 +74,7 @@ type started struct {
 }
 
 // start runs `serve args...` in the background and waits until every expected listener is up.
-func start(t *testing.T, s Service, want []string, args ...string) *started {
+func start(t *testing.T, s svc, want []string, args ...string) *started {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	var mu sync.Mutex
@@ -134,7 +139,7 @@ func TestServeAndHealthcheck(t *testing.T) {
 	if code, _ := get(t, "http://"+st.addrs["internal"]+"/api/healthz"); code != 404 {
 		t.Fatalf("public routes must not be on the internal listener: %d", code)
 	}
-	if code := run(t.Context(), Service{Name: "schoolfleet", InternalAddr: st.addrs["internal"]}, []string{"healthcheck"},
+	if code := run(t.Context(), svc{Name: "schoolfleet", InternalAddr: st.addrs["internal"]}, []string{"healthcheck"},
 		io.Discard, io.Discard, nil, nil); code != 0 {
 		t.Fatalf("healthcheck against a running service exited %d", code)
 	}
@@ -158,7 +163,7 @@ func TestWorkerModeHasNoPublicListener(t *testing.T) {
 }
 
 func TestNoPublicAddrMeansInternalOnly(t *testing.T) {
-	s := Service{Name: "migrate", InternalAddr: "127.0.0.1:0"}
+	s := svc{Name: "migrate", InternalAddr: "127.0.0.1:0"}
 	st := start(t, s, []string{"internal"})
 	if len(st.addrs) != 1 {
 		t.Fatalf("listeners: %v", st.addrs)
@@ -168,7 +173,7 @@ func TestNoPublicAddrMeansInternalOnly(t *testing.T) {
 
 func TestHealthcheckFails(t *testing.T) {
 	// Nothing listening.
-	if code := run(t.Context(), Service{Name: "schoolfleet", InternalAddr: freeAddr(t)}, []string{"healthcheck"},
+	if code := run(t.Context(), svc{Name: "schoolfleet", InternalAddr: freeAddr(t)}, []string{"healthcheck"},
 		io.Discard, io.Discard, nil, nil); code != 1 {
 		t.Fatalf("exit %d with nothing listening, want 1", code)
 	}
@@ -233,6 +238,112 @@ func TestServeRefusesBadStarts(t *testing.T) {
 				t.Fatalf("exit %d, want %d; output %q", code, c.want, out.String())
 			}
 		})
+	}
+}
+
+func TestSetupRunsBeforeListenersAndWiresIn(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		calls    int
+		gotEnv   config.Env
+		closed   int
+		ready    = true
+		closeCtx context.Context
+	)
+	s := testService()
+	s.Setup = func(_ context.Context, cfg config.Base, _ *slog.Logger) (*Runtime, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		gotEnv = cfg.AppEnv
+		return &Runtime{
+			Routes: func(r chi.Router) {
+				r.Get("/api/from-setup", func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "mounted") })
+			},
+			Ready: []httpx.Check{{Name: "dep", Fn: func(context.Context) error {
+				mu.Lock()
+				defer mu.Unlock()
+				if !ready {
+					return errors.New("dep down")
+				}
+				return nil
+			}}},
+			Close: func(ctx context.Context) error {
+				mu.Lock()
+				defer mu.Unlock()
+				closed++
+				closeCtx = ctx
+				return nil
+			},
+		}, nil
+	}
+	st := start(t, s, []string{"internal", "public"})
+
+	mu.Lock()
+	if calls != 1 || gotEnv != config.EnvLocal {
+		t.Fatalf("Setup called %d times with env %q, want once with %q", calls, gotEnv, config.EnvLocal)
+	}
+	if closed != 0 {
+		t.Fatal("Close ran while the service was still serving")
+	}
+	mu.Unlock()
+
+	if code, body := get(t, "http://"+st.addrs["public"]+"/api/from-setup"); code != 200 || body != "mounted" {
+		t.Fatalf("route from Setup: %d %q", code, body)
+	}
+	if code, _ := get(t, "http://"+st.addrs["internal"]+"/readyz"); code != 200 {
+		t.Fatalf("/readyz with a healthy check: %d", code)
+	}
+	mu.Lock()
+	ready = false
+	mu.Unlock()
+	if code, _ := get(t, "http://"+st.addrs["internal"]+"/readyz"); code != 503 {
+		t.Fatalf("/readyz with a failing check: %d, want 503", code)
+	}
+
+	st.shutdown(t)
+	mu.Lock()
+	defer mu.Unlock()
+	if closed != 1 {
+		t.Fatalf("Close ran %d times, want once", closed)
+	}
+	if _, has := closeCtx.Deadline(); !has {
+		t.Fatal("Close context has no deadline: a stuck Close would hang shutdown")
+	}
+}
+
+func TestSetupFailureStopsTheService(t *testing.T) {
+	s := testService()
+	s.Setup = func(context.Context, config.Base, *slog.Logger) (*Runtime, error) {
+		return nil, errors.New("database unreachable")
+	}
+	var out syncBuffer
+	if code := run(t.Context(), s, []string{"serve"}, &out, &out, baseCfg("schoolfleet"), nil); code != 1 {
+		t.Fatalf("exit %d, want 1:\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "setup failed") || !strings.Contains(out.String(), "database unreachable") {
+		t.Fatalf("setup error not logged:\n%s", out.String())
+	}
+}
+
+func TestCloseRunsWhenAListenerFailsToStart(t *testing.T) {
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer busy.Close()
+	var closed bool
+	s := testService()
+	s.PublicAddr = busy.Addr().String()
+	s.Setup = func(context.Context, config.Base, *slog.Logger) (*Runtime, error) {
+		return &Runtime{Close: func(context.Context) error { closed = true; return nil }}, nil
+	}
+	var out syncBuffer
+	if code := run(t.Context(), s, []string{"serve"}, &out, &out, baseCfg("schoolfleet"), nil); code != 1 {
+		t.Fatalf("exit %d, want 1:\n%s", code, out.String())
+	}
+	if !closed {
+		t.Fatal("Setup's resources were not released after a listen failure")
 	}
 }
 

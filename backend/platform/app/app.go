@@ -32,23 +32,46 @@ import (
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/obs"
 )
 
-// ShutdownGrace is how long requests in progress get after SIGTERM. Docker sends SIGKILL 10 s after SIGTERM by
-// default (compose stop_grace_period), so this must stay below that.
-const ShutdownGrace = 8 * time.Second
+// ShutdownGrace is how long requests in progress get after SIGTERM, and CloseGrace is how long Runtime.Close then
+// gets. They run one after the other, and Docker sends SIGKILL 10 s after SIGTERM by default (compose
+// stop_grace_period), so their sum must stay below that.
+const (
+	ShutdownGrace = 6 * time.Second
+	CloseGrace    = 2 * time.Second
+)
 
 // HealthcheckTimeout bounds `healthcheck`. Docker's own check timeout is longer, so a hung service reports
 // unhealthy from here rather than being killed by Docker.
 const HealthcheckTimeout = 3 * time.Second
 
-// Service describes one binary.
-type Service struct {
-	Name         string // must equal SVC_NAME in .env ("schoolfleet")
+// Configured is what this package needs from a binary's config struct: the shared settings every service has.
+// config.Base satisfies it, and so does any struct that embeds config.Base.
+type Configured interface{ BaseConfig() config.Base }
+
+// Service describes one binary. C is the binary's config struct (config.Base for a binary with no extra settings).
+type Service[C Configured] struct {
+	Name         string // must equal SVC_NAME in the service's environment ("schoolfleet")
 	PublicAddr   string // ":8080"; "" = no public listener (docs)
 	InternalAddr string // ":8090"; always present, it serves the health endpoints
 	// Public mounts the public routes. Only called when PublicAddr is set.
 	Public func(r chi.Router)
 	// Modes, if set, are the values `serve --mode` accepts; the first is the default.
 	Modes []string
+	// Setup, if set, runs once in `serve`, after config and logging are ready and before any listener starts. It
+	// opens what the service needs (database pools, clients) and returns what to wire in. An error stops the
+	// service with exit code 1, and Close is not called, so Setup must clean up after itself when it fails.
+	Setup func(ctx context.Context, cfg C, log *slog.Logger) (*Runtime, error)
+}
+
+// Runtime is what Setup hands back to the shared start-up sequence. Every field is optional.
+type Runtime struct {
+	// Routes mounts more public routes, after Service.Public. Only called when the public listener runs.
+	Routes func(r chi.Router)
+	// Ready are extra readiness checks: /readyz answers 503 while any of them fails (e.g. the database ping).
+	Ready []httpx.Check
+	// Close releases what Setup opened. It runs once, after the listeners have stopped, with a context that
+	// expires after CloseGrace.
+	Close func(ctx context.Context) error
 }
 
 // Mode values for `schoolfleet serve` (docs/02 A4): production runs api, worker and ingest as three containers from
@@ -61,14 +84,14 @@ const (
 )
 
 // Main runs the binary and exits with its status. It never returns.
-func Main(s Service) {
-	os.Exit(run(context.Background(), s, os.Args[1:], os.Stdout, os.Stderr, config.Load[config.Base], nil))
+func Main[C Configured](s Service[C]) {
+	os.Exit(run(context.Background(), s, os.Args[1:], os.Stdout, os.Stderr, config.Load[C], nil))
 }
 
 // run is Main without process globals, for tests. listening, if non-nil, receives each listener's name and bound
 // address once it is accepting connections.
-func run(ctx context.Context, s Service, args []string, stdout, stderr io.Writer,
-	load func() (config.Base, error), listening func(name, addr string)) int {
+func run[C Configured](ctx context.Context, s Service[C], args []string, stdout, stderr io.Writer,
+	load func() (C, error), listening func(name, addr string)) int {
 	if len(args) == 0 {
 		usage(stderr, s)
 		return 2
@@ -88,7 +111,7 @@ func run(ctx context.Context, s Service, args []string, stdout, stderr io.Writer
 	}
 }
 
-func usage(w io.Writer, s Service) {
+func usage[C Configured](w io.Writer, s Service[C]) {
 	mode := ""
 	if len(s.Modes) > 0 {
 		mode = " [--mode=" + strings.Join(s.Modes, "|") + "]"
@@ -96,8 +119,8 @@ func usage(w io.Writer, s Service) {
 	fmt.Fprintf(w, "usage: %s serve%s | healthcheck\n", s.Name, mode)
 }
 
-func serve(ctx context.Context, s Service, args []string, stdout, stderr io.Writer,
-	load func() (config.Base, error), listening func(name, addr string)) int {
+func serve[C Configured](ctx context.Context, s Service[C], args []string, stdout, stderr io.Writer,
+	load func() (C, error), listening func(name, addr string)) int {
 	fs := flag.NewFlagSet(s.Name+" serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var mode string
@@ -116,12 +139,13 @@ func serve(ctx context.Context, s Service, args []string, stdout, stderr io.Writ
 		return 2
 	}
 
-	cfg, err := load()
+	full, err := load()
 	if err != nil {
 		// Config errors name the variable and never print its value (platform/config).
 		fmt.Fprintf(stderr, "%s: %v\n", s.Name, err)
 		return 1
 	}
+	cfg := full.BaseConfig()
 	// A service started with another service's env file would run with that service's database role and keys.
 	if cfg.ServiceName != s.Name {
 		fmt.Fprintf(stderr, "%s: SVC_NAME is %q; this binary is %q (wrong env file?)\n", s.Name, cfg.ServiceName, s.Name)
@@ -135,17 +159,43 @@ func serve(ctx context.Context, s Service, args []string, stdout, stderr io.Writ
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	var rt Runtime
+	if s.Setup != nil {
+		got, err := s.Setup(ctx, full, log)
+		if err != nil {
+			// Config types redact themselves, so a Setup error built from them carries no secret.
+			log.Error("setup failed", slog.Any("error", err))
+			return 1
+		}
+		if got != nil {
+			rt = *got
+		}
+	}
+	// Runs on every return below: after the listeners stop, or when one fails to start.
+	defer func() {
+		if rt.Close == nil {
+			return
+		}
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), CloseGrace)
+		defer cancel()
+		if err := rt.Close(cctx); err != nil {
+			log.Error("close failed", slog.Any("error", err))
+		}
+	}()
+
 	type listener struct {
 		name, addr string
 		handler    http.Handler
 	}
-	// TODO(M0.3): add the database ping to the readiness checks.
-	ls := []listener{{"internal", s.InternalAddr, httpx.NewInternalRouter(log)}}
+	ls := []listener{{"internal", s.InternalAddr, httpx.NewInternalRouter(log, rt.Ready...)}}
 	runAPI := mode == "" || mode == ModeAPI || mode == ModeAll
 	if runAPI && s.PublicAddr != "" {
 		r := httpx.NewRouter(log)
 		if s.Public != nil {
 			s.Public(r)
+		}
+		if rt.Routes != nil {
+			rt.Routes(r)
 		}
 		ls = append(ls, listener{"public", s.PublicAddr, r})
 	}

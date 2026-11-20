@@ -14,7 +14,7 @@ and its host tests, Expo app config.
 
 ### M0 — Repo and local loop (0.5 d)
 - [x] M0.1 New repo from this folder; `make tools`; `make dev-db migrate test test-integration` green; CI green — backend/Go green locally (sqlc pinned v1.31.1); frontend/mobile typecheck+lint stay red until M0.5 adds tsconfig/biome/src; CI green pending first push
-- [ ] M0.2 Sumarg config struct (`PLATFORM_DATABASE_URL`, `SECRETS_KEY`, MQTT, FCM, SMS, Maps); `Setup` hook in `platform/app` (same change as Cargo M0.2 — copy it if Cargo did it first) **[review]**
+- [x] M0.2 Sumarg config struct (`PLATFORM_DATABASE_URL`, `SECRETS_KEY`, MQTT, FCM, SMS, Maps); `Setup` hook in `platform/app` (same change as Cargo M0.2 — copy it if Cargo did it first) **[review]**
 - [ ] M0.3 Pools + request tx middleware + readiness (copy from Cargo M0.3) **[review]**
 - [ ] M0.4 huma + error mapping + `schoolfleet openapi` + `make gen-api` for portal and app
 - [ ] M0.5 Portal skeleton (demo CSS, router, `/admin` lazy) and Expo app skeleton (expo-router, auth stack, two tab sets, API client) — `npx expo install --fix`
