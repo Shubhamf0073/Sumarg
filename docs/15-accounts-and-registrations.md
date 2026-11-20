@@ -95,6 +95,10 @@ guardians without the app (docs/05 §6).
    DLT portal bind the PE to the provider's **telemarketer** ID so the delivery chain is traceable. Enter PE ID,
    header and template IDs in the provider; `.env`: `SMS_PROVIDER`, `SMS_API_KEY`, `SMS_SENDER_ID`,
    `SMS_DLT_PE_ID`, `SMS_DLT_TEMPLATE_OTP`, `SMS_DLT_TEMPLATE_INVITE`, … (names in `infra/.env.example`).
+   **Before the first school:** the MSG91 Flow API request in `backend/internal/worker/sms.go` was built from the
+   docs and tested only against a fake server — send one real OTP from the live account and check the request
+   shape (`template_id`, `##var1##` = code / `##var2##` = school, the mobile's country prefix) and the
+   success/error responses.
 6. If the app later auto-reads OTPs on Android (SMS Retriever), register an OTP template variant that ends with the
    app's 11-character hash.
 

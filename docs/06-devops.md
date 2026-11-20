@@ -6,6 +6,8 @@ Same server, tooling and habits as Previa Cargo (`previa-cargo/docs/06-devops.md
 The shared GoDaddy VPS (4 vCPU / 8 GB / 200 GB), as a **separate compose project** `/srv/schoolfleet/compose`
 (api, worker, ingest, db) next to Previa Cargo. Host Nginx serves both products (`limit_req` zones and upstreams
 are prefixed per product; both configs pass `nginx -t` together). Ports: API `127.0.0.1:8720`, MQTT `0.0.0.0:8883`.
+The API must stay reachable **only through Nginx**: it trusts `X-Forwarded-For` (which Nginx overwrites with the
+client address) for session audit and the per-IP OTP limits. Never publish the API port on a public interface.
 
 ## 2. DNS, certificates, firewall
 | Record | Cloudflare | Points to | Used by |

@@ -59,7 +59,7 @@ func Register(api huma.API) {
 		OperationID: "auth-push-token", Method: http.MethodPost, Path: PathPushToken, Tags: []string{"auth"},
 		Summary:       "Parent / driver app: register this install's FCM token for the signed-in session",
 		DefaultStatus: http.StatusNoContent,
-		Errors:        []int{http.StatusUnauthorized, http.StatusForbidden},
+		Errors:        []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests},
 	}, registerPushToken)
 	huma.Register(api, huma.Operation{
 		OperationID: "auth-logout", Method: http.MethodPost, Path: PathLogout, Tags: []string{"auth"},
@@ -115,8 +115,10 @@ func meFrom(p *Principal) MeBody {
 	return b
 }
 
-// clientInfo is filled from the connection, not the body. Nginx sets X-Forwarded-For to the real client IP
-// (infra/nginx/snippets/schoolfleet-proxy.conf); it is stored on the session for the audit view only.
+// clientInfo is filled from the connection, not the body. Nginx overwrites X-Forwarded-For with the real client IP
+// (infra/nginx/snippets/schoolfleet-proxy.conf), and the API publishes on 127.0.0.1 only (infra/docker-compose.yml),
+// so the header is trusted because nothing but Nginx can reach the API (docs/06). It is stored on the session for
+// the audit view and keys the per-IP OTP limits. Trusting it only from the Nginx hop is M1.2a.
 type clientInfo struct {
 	ip        *netip.Addr
 	userAgent string
@@ -318,6 +320,13 @@ func registerPushToken(ctx context.Context, in *pushTokenIn) (*struct{}, error) 
 	}
 	if p.ReadOnly {
 		return nil, nil
+	}
+	d, err := depsFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !d.Limits.allowPushToken(p.SessionID) {
+		return nil, ErrRateLimited
 	}
 	tx, ok := db.TxFrom(ctx)
 	if !ok {

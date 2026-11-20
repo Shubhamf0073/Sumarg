@@ -31,6 +31,9 @@ Start stage 3 the day the agreement is signed.
   installation calendar (docs/12 §9, docs/15 §6).
 - The `/admin` onboarding board lists tenants by `onboarding_stage` with `go_live_on`; the per-school checklist is
   the detail.
+- **Go-live day: set the stage to `live` and `go_live_on` together.** The parent sign-in SMS limit stays raised
+  (60/min instead of 10) until 14 days after `go_live_on` (docs/05 §10). A `live` school with no date drops to
+  10/min on launch day, and a school never moved to `live` keeps 60/min.
 
 ## When to go live
 School years in Gujarat start in June; schools change transport arrangements at the start of the year and after

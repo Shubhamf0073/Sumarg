@@ -274,18 +274,42 @@ func TestOTPPerMobileLimit(t *testing.T) {
 
 func TestOTPPerSchoolLimit(t *testing.T) {
 	e, a, b := newAuthEnv(t)
-	for i := range 11 {
-		m := fmt.Sprintf("97000000%02d", i)
-		e.guardian(t, a, m, true)
-		e.guardian(t, b, m, true)
-		e.do(t, otpCall(a.code, m))
+	// Live dates are IST, like the query's: A went live 14 days ago (past the launch window), B 13 days ago.
+	golive := `UPDATE tenants SET onboarding_stage = 'live', go_live_on = (now() AT TIME ZONE 'Asia/Kolkata')::date - $2::int
+		WHERE id = $1`
+	e.exec(t, golive, a.id, 14)
+	e.exec(t, golive, b.id, 13)
+	queued := `SELECT count(*) FROM notifications WHERE tenant_id = $1 AND event = 'otp'`
+	next := 0
+	request := func(s school, n int) {
+		for range n {
+			m := fmt.Sprintf("97%08d", next)
+			next++
+			e.guardian(t, s, m, true)
+			wantCode(t, "request", e.do(t, otpCall(s.code, m)), http.StatusAccepted, "")
+		}
 	}
-	if n := e.count(t, `SELECT count(*) FROM notifications WHERE tenant_id = $1 AND event = 'otp'`, a.id); n != 10 {
-		t.Fatalf("school A queued %d, want 10", n)
+
+	request(a, 11)
+	if n := e.count(t, queued, a.id); n != 10 {
+		t.Fatalf("live school A queued %d, want 10", n)
 	}
-	e.do(t, otpCall(b.code, "9700000000"))
-	if n := e.count(t, `SELECT count(*) FROM notifications WHERE tenant_id = $1 AND event = 'otp'`, b.id); n != 1 {
-		t.Fatalf("school B blocked by A's limit: %d", n)
+	request(b, 61)
+	if n := e.count(t, queued, b.id); n != 60 {
+		t.Fatalf("school B (13 days live) queued %d, want 60", n)
+	}
+	// A school not live yet is in the launch window too; A's 10 still count towards its 60.
+	e.exec(t, `UPDATE tenants SET onboarding_stage = 'training', go_live_on = NULL WHERE id = $1`, a.id)
+	request(a, 51)
+	if n := e.count(t, queued, a.id); n != 60 {
+		t.Fatalf("school A in training queued %d, want 60", n)
+	}
+	// Live with no go-live date: outside the window (10/min), and still a 202, not a 500.
+	e.exec(t, `UPDATE tenants SET onboarding_stage = 'live', go_live_on = NULL WHERE id = $1`, b.id)
+	e.exec(t, `UPDATE notifications SET created_at = now() - interval '2 minutes' WHERE tenant_id = $1`, b.id)
+	request(b, 11)
+	if n := e.count(t, queued, b.id); n != 70 {
+		t.Fatalf("school B live without a date queued %d more, want 10", n-60)
 	}
 }
 
@@ -421,6 +445,43 @@ func TestPushToken(t *testing.T) {
 	wantCode(t, "anonymous", e.do(t, call{method: http.MethodPost, path: auth.PathPushToken,
 		body: map[string]string{"platform": "ios", "fcm_token": "fcm-anon-eeeeeeeeeeeeee", "app_version": "1.0.0"}}),
 		http.StatusUnauthorized, "unauthenticated")
+}
+
+func TestPushTokenLimit(t *testing.T) {
+	e, a, b := newAuthEnv(t)
+	app, err := db.OpenApp(t.Context(), config.Secret(os.Getenv("TEST_APP_URL")), db.Options{Name: "test-push-limit", MaxConns: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(app.Close)
+	r := chi.NewRouter()
+	fake := clock.NewFake(time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC))
+	mountAPI(r, auth.Deps{DB: db.Bind(app), OTP: e.keys, Limits: auth.NewLimits(fake)})
+	tokA := e.parentToken(t, a, e.guardian(t, a, parentMobile, true), installOne)
+	tokB := e.parentToken(t, b, e.guardian(t, b, parentMobile, true), installOne)
+	push := func(tok string, i int) int {
+		c := pushCall(tok, installOne, fmt.Sprintf("fcm-limit-token-%06d:x", i))
+		return serve(r, c.method, c.path, c.body, c.headers).Code
+	}
+	for i := range 20 {
+		if got := push(tokA, i); got != http.StatusNoContent {
+			t.Fatalf("registration %d: %d", i+1, got)
+		}
+	}
+	if got := push(tokA, 20); got != http.StatusTooManyRequests {
+		t.Fatalf("21st registration: %d, want 429", got)
+	}
+	if n := e.count(t, `SELECT count(*) FROM push_tokens WHERE tenant_id = $1`, a.id); n != 20 {
+		t.Fatalf("school A rows: %d, want 20", n)
+	}
+	// Per session: school B's session is untouched by A's count; A gets a new allowance next window.
+	if got := push(tokB, 100); got != http.StatusNoContent {
+		t.Fatalf("other school's session: %d", got)
+	}
+	fake.Advance(time.Hour)
+	if got := push(tokA, 21); got != http.StatusNoContent {
+		t.Fatalf("next window: %d", got)
+	}
 }
 
 // ── worker ──

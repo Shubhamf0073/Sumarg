@@ -274,20 +274,27 @@ const oTPIssueCounts = `-- name: OTPIssueCounts :one
 SELECT (SELECT count(*) FROM otp_challenges c
         WHERE c.mobile = $1 AND c.created_at > now() - interval '1 hour')::integer AS mobile_hour,
        (SELECT count(*) FROM notifications n
-        WHERE n.event = 'otp' AND n.created_at > now() - interval '1 minute')::integer AS school_minute
+        WHERE n.event = 'otp' AND n.created_at > now() - interval '1 minute')::integer AS school_minute,
+       -- COALESCE: a live school with no go_live_on (or no row) is outside the window, never NULL.
+       COALESCE((SELECT t.onboarding_stage <> 'live'
+                        OR t.go_live_on > (now() AT TIME ZONE 'Asia/Kolkata')::date - 14
+                 FROM tenants t WHERE t.id = app_tenant()), false)::boolean AS launch_window
 `
 
 type OTPIssueCountsRow struct {
 	MobileHour   int32
 	SchoolMinute int32
+	LaunchWindow bool
 }
 
 // Parent app → request code: codes issued to this mobile in the last hour (max 3) and code SMS queued by the
-// school in the last minute (max 10). Unknown mobiles get a challenge too, so they count the same.
+// school in the last minute (max 10, or 60 in the launch window). Unknown mobiles get a challenge too, so they count
+// the same. launch_window: the school isn't live yet, or went live in the last 14 days (IST dates) — every parent
+// signs in then, so the per-school limit is raised (docs/05 §10).
 func (q *Queries) OTPIssueCounts(ctx context.Context, mobile string) (OTPIssueCountsRow, error) {
 	row := q.db.QueryRow(ctx, oTPIssueCounts, mobile)
 	var i OTPIssueCountsRow
-	err := row.Scan(&i.MobileHour, &i.SchoolMinute)
+	err := row.Scan(&i.MobileHour, &i.SchoolMinute, &i.LaunchWindow)
 	return i, err
 }
 

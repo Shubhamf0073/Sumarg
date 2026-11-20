@@ -26,12 +26,20 @@ import (
 const (
 	otpMaxPerMobileHour   = 3
 	otpMaxPerSchoolMinute = 10
-	otpMaxAttempts        = 5
+	// Launch window (not live yet, or live for under 14 days): every parent signs in in the same few days. SMS
+	// only ever go to invited numbers at 3/mobile/hour, so the per-school limit caps cost, not toll fraud.
+	otpMaxPerSchoolMinuteLaunch = 60
+	otpMaxAttempts              = 5
 
 	// Per client address (CGNAT puts many parents behind one IP, so these are loose).
 	otpRequestsPerIP = 30
 	otpVerifiesPerIP = 60
 	otpIPWindow      = 10 * time.Minute
+
+	// Per app session: the app registers after sign-in and when FCM rotates the token, so this is never reached
+	// by a real phone; it stops one session from filling push_tokens with retired rows.
+	pushTokensPerSession = 20
+	pushTokenWindow      = time.Hour
 )
 
 var (
@@ -45,14 +53,20 @@ var (
 // Limits are the in-process per-IP limiters of the unauthenticated parent endpoints. A nil *Limits allows all.
 type Limits struct {
 	otpRequest, otpVerify *ratelimit.Limiter
+	pushToken             *ratelimit.Limiter // keyed by session id
 }
 
-// NewLimits returns the per-IP limits for one API process.
+// NewLimits returns the per-IP and per-session limits for one API process.
 func NewLimits(c clock.Clock) *Limits {
 	return &Limits{
 		otpRequest: ratelimit.New(c, otpRequestsPerIP, otpIPWindow),
 		otpVerify:  ratelimit.New(c, otpVerifiesPerIP, otpIPWindow),
+		pushToken:  ratelimit.New(c, pushTokensPerSession, pushTokenWindow),
 	}
+}
+
+func (l *Limits) allowPushToken(sessionID int64) bool {
+	return l == nil || l.pushToken.Allow(strconv.FormatInt(sessionID, 10))
 }
 
 func (l *Limits) allow(which func(*Limits) *ratelimit.Limiter, ip *netip.Addr) bool {
@@ -86,6 +100,11 @@ type otpRequest struct {
 // whether or not the mobile is a guardian's; only an invited, app-enabled guardian's challenge gets an SMS, queued
 // in the same transaction for the worker (no outbound HTTP in requests, invariant 9). The caller answers 202 to
 // every nil return.
+//
+// Timing (docs/05 §10): within a school every mobile does the same lookups and the same seal; an invited guardian's
+// request differs only by one outbox INSERT in the same commit (well under a millisecond, below network jitter, and
+// sampled at most 3 times an hour per mobile). An unknown school code returns without a transaction: school codes
+// are printed on invite links and QR codes, so they aren't secret (as for staff login).
 func requestOTP(ctx context.Context, d Deps, req otpRequest) error {
 	if !d.Limits.allow(func(l *Limits) *ratelimit.Limiter { return l.otpRequest }, req.IP) {
 		return ErrRateLimited
@@ -108,12 +127,16 @@ func requestOTP(ctx context.Context, d Deps, req otpRequest) error {
 		if err != nil {
 			return err
 		}
+		schoolMax := otpMaxPerSchoolMinute
+		if n.LaunchWindow {
+			schoolMax = otpMaxPerSchoolMinuteLaunch
+		}
 		// Over a limit: nothing is issued, and a code already sent stays valid.
 		switch {
 		case n.MobileHour >= otpMaxPerMobileHour:
 			limited = "mobile"
 			return nil
-		case n.SchoolMinute >= otpMaxPerSchoolMinute:
+		case int(n.SchoolMinute) >= schoolMax:
 			limited = "school"
 			return nil
 		}
@@ -125,19 +148,17 @@ func requestOTP(ctx context.Context, d Deps, req otpRequest) error {
 			return err
 		}
 		g, err := q.GuardianForLogin(ctx, req.Mobile)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if !g.AppEnabled {
-			return nil
-		}
+		// Sealed for every mobile, so the crypto work doesn't tell guardians apart; only theirs is queued.
 		key := "otp:" + strconv.FormatInt(id, 10)
-		box, err := d.OTP.Seal(code, otp.BoxAAD(school.TenantID, key))
-		if err != nil {
-			return err
+		box, sealErr := d.OTP.Seal(code, otp.BoxAAD(school.TenantID, key))
+		if sealErr != nil {
+			return sealErr
+		}
+		if err != nil || !g.AppEnabled {
+			return nil
 		}
 		return q.QueueOTPSMS(ctx, &g.ID, box, key)
 	})
@@ -241,7 +262,9 @@ func startParentSession(ctx context.Context, q *tenantq.Queries, req otpVerify, 
 		TenantID: school.TenantID, Client: ClientParentApp, GuardianID: g.ID, Role: "parent", Name: g.Name,
 		ReadOnly: school.Status == "suspended",
 	}}
-	// No fixation: a token the client already holds for this school is ended (see startSession).
+	// No fixation: a token the client already holds for this school is ended (see startSession). A token for
+	// another school is left alone: its session is under that school's RLS and can't be fixed onto this one; it
+	// expires on its own or by logout.
 	if t, oldHash, ok := parseToken(req.Presented); ok && t == school.TenantID {
 		if err := q.RevokeSessionByHash(ctx, oldHash); err != nil {
 			return nil, err

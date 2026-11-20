@@ -81,12 +81,18 @@ settled code-SMS rows are deleted by the worker after 24 h (the sealed code is w
   absolute 7 days, CSRF double-submit + Origin *(Cargo)*.
 - Apps: `Authorization: Bearer <tenant_id>.<token>`; 90-day session bound to `install_id`, renewed on use; one
   active driver session per user (a new phone logs out the old one).
-- Parent OTP: 6 digits, 5 min, max 5 attempts, max 3 OTPs per mobile per hour and 10 per school per minute; same
-  response for unknown mobiles (no oracle) — only invited guardians receive an SMS.
+- Parent OTP: 6 digits, 5 min, max 5 attempts, max 3 OTPs per mobile per hour and 10 SMS per school per minute —
+  **60 per minute in the launch window** (school not live yet, or `go_live_on` within the last 14 days, IST), when
+  every parent signs in at once. SMS only ever go to invited numbers, so the school limit caps cost, not toll fraud.
+  Same response and the same work for unknown mobiles (no oracle) — only invited guardians receive an SMS; the one
+  residual difference is the outbox insert in the same commit. Verify is identical for every mobile until the code
+  matches. School codes are not secret (printed on invites and QR codes), so an unknown code may answer faster.
+- Push tokens: at most 20 registrations per session per hour (429), so one session can't fill `push_tokens`.
 - Driver PIN: 6 digits, exponential backoff after 5 failures, reset by an admin.
 - Backoff (passwords and PINs): from the 5th failure the next try waits 30 s, doubling to 15 min; during backoff even
   the right secret gets the same 401. A cancelled school → 423 after the secret verifies; a suspended school signs in
-  read-only. Login revokes any session the client presents (no fixation).
+  read-only. Login revokes any session the client presents for the same school (no fixation); a token for another
+  school is left to expire — it is under that school's RLS and can't be fixed onto this one.
 - Support view: Previa support gets a 30-min read-only session (`InTenantReadOnly`), shown in the school's audit.
 
 ## 11. Packages and billing (Previa → school)
