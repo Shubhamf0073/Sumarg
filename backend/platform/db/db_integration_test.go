@@ -188,6 +188,26 @@ func TestSessionLookupNeedsTheRightTenant(t *testing.T) {
 	}
 }
 
+// The unit's MQTT secret hash is read by ingest only; sf_app has a column grant on bus_units that leaves it out.
+func TestAppCannotReadUnitSecretHash(t *testing.T) {
+	f := setup(t)
+	ctx := t.Context()
+	err := db.InTenantReadOnly(ctx, f.app, f.t1, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "SELECT secret_hash FROM bus_units")
+		return err
+	})
+	if !isCode(err, "42501") { // insufficient_privilege
+		t.Fatalf("secret_hash as sf_app: want 42501, got %v", err)
+	}
+	err = db.InTenantReadOnly(ctx, f.app, f.t1, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "SELECT id, uid, status, fw_version, last_seen_at FROM bus_units")
+		return err
+	})
+	if err != nil {
+		t.Fatalf("granted columns as sf_app: %v", err)
+	}
+}
+
 func TestPoolsRefuseTheWrongRole(t *testing.T) {
 	appURL, platURL := os.Getenv("TEST_APP_URL"), os.Getenv("TEST_PLATFORM_URL")
 	if appURL == "" || platURL == "" {

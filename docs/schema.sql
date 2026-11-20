@@ -879,7 +879,10 @@ GRANT SELECT, INSERT, UPDATE ON
     student_guardians, sessions, otp_challenges, push_tokens, files, trips, trip_stops, inspections, boardings,
     absences, alerts, incidents, notifications, announcements, requests
     TO sf_app;
-GRANT SELECT ON tenants, subscriptions, platform_invoices, bus_units, positions, vehicle_live TO sf_app;
+GRANT SELECT ON tenants, subscriptions, platform_invoices, positions, vehicle_live TO sf_app;
+-- bus_units: column grant, never secret_hash (the MQTT secret's argon2id hash is read by ingest only).
+GRANT SELECT (id, uid, hw_rev, imei, iccid, fw_version, fw_channel, tenant_id, vehicle_id, status,
+              installed_at, last_seen_at, last_status, created_at) ON bus_units TO sf_app;
 GRANT SELECT, INSERT ON audit_log TO sf_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO sf_app;
 -- Deliberately NOT granted to sf_app: platform_*, agents, agent_commissions, firmware_releases, unit_commands,

@@ -41,6 +41,9 @@ type GetSessionRow struct {
 
 // Every authenticated request, inside db.InTenant(tenant id parsed from the token): a forged tenant id finds no
 // row under RLS → 401. Validity is enforced here, not in Go.
+// TODO(support-sessions): platform_user_id sessions are not checked here (sf_app cannot read platform_users).
+// When support sessions are built: give them a short expires_at and revoke them in the same platform
+// transaction that deactivates the platform user or revokes their platform session.
 func (q *Queries) GetSession(ctx context.Context, tokenHash []byte) (GetSessionRow, error) {
 	row := q.db.QueryRow(ctx, getSession, tokenHash)
 	var i GetSessionRow

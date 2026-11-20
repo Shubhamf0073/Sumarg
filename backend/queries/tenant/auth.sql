@@ -26,6 +26,9 @@ FROM sessions s
 JOIN tenants t ON t.id = s.tenant_id
 LEFT JOIN users u ON u.tenant_id = s.tenant_id AND u.id = s.user_id
 LEFT JOIN guardians g ON g.tenant_id = s.tenant_id AND g.id = s.guardian_id
+-- TODO(support-sessions): platform_user_id sessions are not checked here (sf_app cannot read platform_users).
+-- When support sessions are built: give them a short expires_at and revoke them in the same platform
+-- transaction that deactivates the platform user or revokes their platform session.
 WHERE s.token_hash = @token_hash
   AND s.revoked_at IS NULL
   AND s.expires_at > now()
