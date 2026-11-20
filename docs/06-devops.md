@@ -11,7 +11,15 @@ client address) only on connections from `TRUSTED_PROXIES` — the compose netwo
 in `docker-compose.yml` — and uses it for session audit and the per-IP sign-in limits; from any other peer the
 connection's own address counts. Never publish the API port on a public interface. After a deploy, check that new
 sessions record real client IPs (not `172.30.231.1`); if they don't, the hop arrives from another address (e.g.
-Docker's userland proxy is off) and `TRUSTED_PROXIES` must name that one.
+Docker's userland proxy is off) and `TRUSTED_PROXIES` must name that one — otherwise every client shares one
+per-IP bucket (60 sign-ins per 10 min for everyone).
+
+Deploy checklist for the proxy hop (M1.2b):
+- **Before the first deploy:** `docker network ls` and `docker network inspect <each> --format '{{.Name}}
+  {{range .IPAM.Config}}{{.Subnet}}{{end}}'` on the VPS — `172.30.231.0/24` must not overlap Previa Cargo's (or any)
+  network; if it does, pick a free /24 in `docker-compose.yml` and `TRUSTED_PROXIES` together.
+- **After it:** sign in once from a phone on mobile data, then
+  `SELECT ip FROM sessions ORDER BY id DESC LIMIT 5` — real public addresses, never `172.30.231.1`.
 
 ## 2. DNS, certificates, firewall
 | Record | Cloudflare | Points to | Used by |

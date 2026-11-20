@@ -26,15 +26,12 @@ and its host tests, Expo app config.
 - [x] M1.3 Parent OTP login (SMS gateway adapter + stub), rate limits, 90-day app sessions, push-token registration **[opus] [review]** — `internal/tenant/auth` otp + push-token; code HMAC'd (HKDF keys, `internal/shared/otp`), AES-GCM-sealed in the outbox, sent by `internal/worker` (lease claim, send outside tx, 24 h purge; stub + MSG91, 2factor refused at start); per-IP limiter `platform/ratelimit`; `platform/app` Runtime.Workers (copy to Cargo); migration 00003 indexes; app OTP screens + X-Install-Id + push registration; walker signs in via real OTP
 - [x] M1.3a OTP follow-ups (review): launch-day burst vs 10 SMS/school/min (raise or lift during onboarding? decide before the first school); even request/verify timing for invited vs unknown mobiles and known vs unknown school; M4.4 must push only to tokens whose session is live (revoked sessions' push_tokens stay unretired); state that a presented token from another school isn't revoked; API reachable only via Nginx (X-Forwarded-For trust, with M1.2a); push-token endpoint has no rate limit; MSG91 request shape to verify on the live account (R9); iOS push token is APNs, not FCM (M4.4/M5.3) **[review]**
 - [x] M1.2a Auth follow-ups (review): per-user backoff alone lets an attacker hold one user's login closed — M1.3's per-IP and per-school limits must cover `/auth/login` and `/auth/app/pin` too (or let a correct secret through at a reduced rate); trust `X-Forwarded-For` only from the Nginx hop once per-IP limits use it; `db.Resolved.Ctx` must derive from `r.Context()` (not enforced); support-view sessions (platform user) are refused until built; `.env.example` `PORTAL_SESSION_*`/`APP_SESSION_DAYS` are not read (lifetimes are fixed in code/SQL) **[review]**
-- [ ] M1.2b Sign-in follow-ups (M1.2a review): 5 addresses (or a rented IPv6 range's /64s) can still hold a user
-  closed for 24 h via the 50/day cap — let a known device (driver install with a past session; a portal device
-  cookie) through at a reduced rate; log once when the in-process backoff table is full (fail-open); before deploy,
-  `docker network inspect` that 172.30.231.0/24 doesn't overlap Cargo, and after it check sessions record real IPs
-  (docs/06 §1) — if the hop isn't `172.30.231.1`, every client shares one per-IP bucket (60 sign-ins/10 min for
-  all); the daily-cap warning can log twice in one window (a success takes 1 off the count) — log once per window
-  or accept; drop `users.locked_until` (contract, needs approval); M1.4 adds `ADMIN_SESSION_HOURS` back to
-  `.env.example` when it is read
-- [ ] M1.4 Admin passkeys (copy Cargo), onboarding wizard (school, campuses, settings, owner, package) **[review]** —
+- [x] M1.2b Sign-in follow-ups (M1.2a review): known device (driver install with a past session; portal
+  `__Host-sf_dev` cookie) past the 50/day cap at a reduced rate; backoff-table-full warning; cap warning once per
+  user per 24 h; `users.locked_until` dropped (00005, approved) + `sessions_user` index; proxy-hop deploy checklist
+  in docs/06 §1 (run by the human at the first deploy)
+- [ ] M1.4 Admin passkeys (copy Cargo), onboarding wizard (school, campuses, settings, owner, package) **[review]** — add
+  `ADMIN_SESSION_HOURS` back to `.env.example` once it is read (M1.2b);
   moving a school to `live` sets `go_live_on` to today (IST) if empty, in the same save (the OTP launch window,
   docs/05 §10, M1.3a)
 - [ ] M1.5 School setup screens: campuses, vehicles, crew, users

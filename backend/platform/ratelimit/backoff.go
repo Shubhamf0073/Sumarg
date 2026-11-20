@@ -32,7 +32,13 @@ type Backoff struct {
 	mu        sync.Mutex
 	nextSweep time.Time
 	entries   map[string]*backoffEntry
+	onFull    func()    // called (outside the lock) when a new key is let through uncounted
+	nextFull  time.Time // onFull fires at most once per Max
 }
+
+// OnFull sets fn to be called when the table is full and a new key is let through uncounted, at most once per
+// policy Max, so an operator learns the backoff has stopped counting (e.g. log a warning). Set it before use.
+func (b *Backoff) OnFull(fn func()) { b.onFull = fn }
 
 type backoffEntry struct {
 	fails    int       // in a row, since the last success
@@ -48,6 +54,15 @@ func NewBackoff(c clock.Clock, p BackoffPolicy) *Backoff {
 
 // Claim reports whether key may try now; if so the try is counted as a failure until Succeeded is called.
 func (b *Backoff) Claim(key string) bool {
+	ok, full := b.claim(key)
+	if full && b.onFull != nil {
+		b.onFull()
+	}
+	return ok
+}
+
+// claim is Claim under the lock; full reports that onFull is due.
+func (b *Backoff) claim(key string) (ok, full bool) {
 	now := b.clock.Now()
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -55,7 +70,11 @@ func (b *Backoff) Claim(key string) bool {
 	e := b.entries[key]
 	if e == nil {
 		if len(b.entries) >= b.maxKeys {
-			return true
+			if now.Before(b.nextFull) {
+				return true, false
+			}
+			b.nextFull = now.Add(b.p.Max)
+			return true, true
 		}
 		e = &backoffEntry{dayStart: now}
 		b.entries[key] = e
@@ -64,7 +83,7 @@ func (b *Backoff) Claim(key string) bool {
 		e.dayStart, e.dayFails = now, 0
 	}
 	if now.Before(e.until) || e.dayFails >= b.p.PerDay {
-		return false
+		return false, false
 	}
 	e.fails++
 	e.dayFails++
@@ -77,7 +96,7 @@ func (b *Backoff) Claim(key string) bool {
 		}
 		e.until = now.Add(wait)
 	}
-	return true
+	return true, false
 }
 
 // Succeeded forgets key's failures: its try was right.

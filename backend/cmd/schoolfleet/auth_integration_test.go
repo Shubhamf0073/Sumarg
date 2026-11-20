@@ -102,7 +102,12 @@ func newAuthEnv(t *testing.T) (*authEnv, school, school) {
 	keys := testOTPKeys(t)
 	r := chi.NewRouter()
 	fake := clock.NewFake(time.Date(2026, 11, 21, 8, 0, 0, 0, time.UTC))
-	mountAPI(r, auth.Deps{DB: db.Bind(app), Origins: []string{testOrigin}, OTP: keys, Limits: auth.NewLimits(fake)})
+	device, err := auth.NewDeviceKeys(strings.Repeat("cd", 32), fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mountAPI(r, auth.Deps{DB: db.Bind(app), Origins: []string{testOrigin}, OTP: keys, Device: device,
+		Limits: auth.NewLimits(fake)})
 	env := &authEnv{h: r, clock: fake, keys: keys,
 		plat: func(ctx context.Context, fn func(pgx.Tx) error) error { return platformdb.InPlatform(ctx, plat, fn) }}
 	env.exec = func(t *testing.T, sql string, args ...any) {
@@ -421,6 +426,99 @@ func TestLoginDailyCaps(t *testing.T) {
 	e.exec(t, `UPDATE users SET fail_window_start = now() - interval '24 hours' WHERE id = $1`, a.driverID)
 	c.remote = "198.51.100.11"
 	wantCode(t, "next day", e.do(t, c), http.StatusOK, "")
+}
+
+// closeDailyCap puts a user at the daily cap, as if 50 failures from many addresses had just happened.
+func (e *authEnv) closeDailyCap(t *testing.T, userID int64) {
+	t.Helper()
+	e.exec(t, `UPDATE users SET fail_window_start = now(), fail_window_count = 50 WHERE id = $1`, userID)
+}
+
+func (e *authEnv) failWindowCount(t *testing.T, userID int64) int {
+	t.Helper()
+	var n int
+	e.q(t, `SELECT fail_window_count FROM users WHERE id = $1`, &n, userID)
+	return n
+}
+
+// With the daily cap closed, the driver's own phone (an install that has had a session) still signs in, at a reduced
+// rate; a new install doesn't, nor does an install known only to the other school's driver with the same mobile.
+func TestKnownInstallPastDailyCap(t *testing.T) {
+	e, a, b := newAuthEnv(t)
+	e.pinSession(t, a, installOne)
+	e.pinSession(t, b, installTwo)
+	e.closeDailyCap(t, a.driverID)
+
+	try := func(pin, install, ip string) resp {
+		c := pinCall(a.code, driverMobile, pin, install)
+		c.remote = ip
+		return e.do(t, c)
+	}
+	wantCode(t, "new install", try(driverPIN, "install-cccccccccccccccc", "198.51.100.1"),
+		http.StatusUnauthorized, "bad_credentials")
+	wantCode(t, "install of school B's driver", try(driverPIN, installTwo, "198.51.100.2"),
+		http.StatusUnauthorized, "bad_credentials")
+	wantCode(t, "own phone", try(driverPIN, installOne, "198.51.100.3"), http.StatusOK, "")
+	if n := e.failWindowCount(t, a.driverID); n != 50 {
+		t.Fatalf("fail_window_count = %d after a known-device success, want 50 (nothing was claimed)", n)
+	}
+
+	// Reduced rate: 3 wrong PINs from the phone (different addresses, so only the device's backoff counts), then a
+	// 1-minute wait even for the right PIN.
+	for i := range 3 {
+		wantCode(t, "wrong on own phone", try("000000", installOne, fmt.Sprintf("198.51.100.%d", 10+i)),
+			http.StatusUnauthorized, "bad_credentials")
+	}
+	wantCode(t, "own phone backing off", try(driverPIN, installOne, "198.51.100.20"),
+		http.StatusUnauthorized, "bad_credentials")
+	if n := e.failWindowCount(t, a.driverID); n != 50 {
+		t.Fatalf("known-device failures reached the database count: %d", n)
+	}
+	e.clock.Advance(time.Minute)
+	wantCode(t, "own phone after the wait", try(driverPIN, installOne, "198.51.100.21"), http.StatusOK, "")
+}
+
+// The portal's device cookie does the same for a browser the owner has signed in on, and only for that school/user.
+func TestDeviceCookiePastDailyCap(t *testing.T) {
+	e, a, b := newAuthEnv(t)
+	devOf := func(r resp) *http.Cookie {
+		for _, c := range r.cookies {
+			if c.Name == auth.DeviceCookie {
+				return c
+			}
+		}
+		t.Fatalf("no device cookie in %v", r.cookies)
+		return nil
+	}
+	ra := e.do(t, portalLoginCall(a.code, ownerMobile, ownerPass))
+	wantCode(t, "login A", ra, http.StatusOK, "")
+	devA := devOf(ra)
+	if !devA.HttpOnly || !devA.Secure || devA.SameSite != http.SameSiteStrictMode || devA.Path != "/" {
+		t.Fatalf("device cookie %+v", devA)
+	}
+	rb := e.do(t, portalLoginCall(b.code, ownerMobile, ownerPass))
+	wantCode(t, "login B", rb, http.StatusOK, "")
+	devB := devOf(rb)
+	e.closeDailyCap(t, a.ownerID)
+
+	try := func(dev *http.Cookie, ip string) resp {
+		c := portalLoginCall(a.code, ownerMobile, ownerPass)
+		c.remote = ip
+		if dev != nil {
+			c.cookies = []*http.Cookie{dev}
+		}
+		return e.do(t, c)
+	}
+	wantCode(t, "no cookie", try(nil, "198.51.100.1"), http.StatusUnauthorized, "bad_credentials")
+	wantCode(t, "school B's cookie", try(devB, "198.51.100.2"), http.StatusUnauthorized, "bad_credentials")
+	forged := &http.Cookie{Name: auth.DeviceCookie, Value: devA.Value + "x"}
+	wantCode(t, "forged cookie", try(forged, "198.51.100.3"), http.StatusUnauthorized, "bad_credentials")
+	r := try(devA, "198.51.100.4")
+	wantCode(t, "own browser", r, http.StatusOK, "")
+	devOf(r) // refreshed
+	if n := e.failWindowCount(t, a.ownerID); n != 50 {
+		t.Fatalf("fail_window_count = %d, want 50", n)
+	}
 }
 
 // Too many sign-ins from one address are answered 429, which says nothing about the mobile.

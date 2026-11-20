@@ -58,6 +58,18 @@ var loginBackoff = ratelimit.BackoffPolicy{
 // is one chance in 20,000 a day.
 const loginFailuresPerDay = 50
 
+// knownDeviceBackoff applies only once the daily cap is closed, per user + known device (a driver install that had a
+// session, a portal browser with a device cookie): the real user can still sign in from their own phone or browser,
+// at a reduced rate, however many addresses an attacker used to close the cap. It is in-process, so a restart gives
+// a known device a fresh 10; an attacker needs the device's install id or HttpOnly cookie to use it at all.
+var knownDeviceBackoff = ratelimit.BackoffPolicy{
+	Free: 3, Base: time.Minute, Max: time.Hour, PerDay: 10, Day: 24 * time.Hour,
+}
+
+// capWarnWindow: the "daily cap reached" warning is logged once per user per window (a success takes one failure
+// back off the count, so the cap can be reached more than once in a window).
+const capWarnWindow = 24 * time.Hour
+
 var (
 	errBadCode = httpx.NewError(http.StatusUnauthorized, "bad_credentials",
 		"The school code, mobile number or code is not right.")
@@ -72,18 +84,40 @@ type Limits struct {
 	otpRequest, otpVerify *ratelimit.Limiter
 	login                 *ratelimit.Limiter // portal password and driver PIN, per IP
 	loginBackoff          *ratelimit.Backoff // per school code + mobile + IP
+	deviceBackoff         *ratelimit.Backoff // per tenant + user + known device, only while the daily cap is closed
+	capWarn               *ratelimit.Limiter // per tenant + user: one "cap reached" warning per window
 	pushToken             *ratelimit.Limiter // keyed by session id
 }
 
 // NewLimits returns the per-IP and per-session limits for one API process.
 func NewLimits(c clock.Clock) *Limits {
-	return &Limits{
-		otpRequest:   ratelimit.New(c, otpRequestsPerIP, otpIPWindow),
-		otpVerify:    ratelimit.New(c, otpVerifiesPerIP, otpIPWindow),
-		login:        ratelimit.New(c, loginsPerIP, loginIPWindow),
-		loginBackoff: ratelimit.NewBackoff(c, loginBackoff),
-		pushToken:    ratelimit.New(c, pushTokensPerSession, pushTokenWindow),
+	l := &Limits{
+		otpRequest:    ratelimit.New(c, otpRequestsPerIP, otpIPWindow),
+		otpVerify:     ratelimit.New(c, otpVerifiesPerIP, otpIPWindow),
+		login:         ratelimit.New(c, loginsPerIP, loginIPWindow),
+		loginBackoff:  ratelimit.NewBackoff(c, loginBackoff),
+		deviceBackoff: ratelimit.NewBackoff(c, knownDeviceBackoff),
+		capWarn:       ratelimit.New(c, 1, capWarnWindow),
+		pushToken:     ratelimit.New(c, pushTokensPerSession, pushTokenWindow),
 	}
+	// Fail open, but say so: a full table means sign-in failures from new addresses aren't being slowed down.
+	l.loginBackoff.OnFull(func() { slog.Warn("login backoff table full: new addresses are not being counted") })
+	l.deviceBackoff.OnFull(func() { slog.Warn("known-device backoff table full: new devices are not being counted") })
+	return l
+}
+
+// claimKnownDevice: a try from a known device while the daily cap is closed (counted until it succeeds).
+func (l *Limits) claimKnownDevice(key string) bool { return l == nil || l.deviceBackoff.Claim(key) }
+
+func (l *Limits) knownDeviceSucceeded(key string) {
+	if l != nil {
+		l.deviceBackoff.Succeeded(key)
+	}
+}
+
+// warnCap reports whether the "cap reached" warning is due for this user (once per window).
+func (l *Limits) warnCap(tenantID, userID int64) bool {
+	return l == nil || l.capWarn.Allow(strconv.FormatInt(tenantID, 10)+"|"+strconv.FormatInt(userID, 10))
 }
 
 // loginKey: the school code as typed (lower-cased) so an unknown school or mobile backs off exactly like a known one.

@@ -94,8 +94,16 @@ settled code-SMS rows are deleted by the worker after 24 h (the sealed code is w
   one address gets at most 10 failures a day per mobile; during backoff even the right secret gets the same 401.
   Unknown mobiles back off the same way (no oracle). Over every address together a user gets at most 50 failures
   per 24 h (counted in the database, survives restarts; successes don't count, but don't reset it), after which every try gets the
-  same 401 until the window ends and a warning is logged. A 6-digit PIN is then one chance in 20,000 a day, and
-  locking a user out takes 5 addresses at once. Per address, at most 60 sign-ins per 10 min (429). There is no
+  same 401 until the window ends and a warning is logged (once per user per 24 h). A 6-digit PIN is then one chance
+  in 20,000 a day. Closing the cap (5 addresses, or one IPv6 range's /64s) doesn't lock the user out of their own
+  device: a **known device** — a driver install that has had a session for that user, or a portal browser holding
+  the `__Host-sf_dev` cookie (HMAC-signed for school + user, 180 days, refreshed on each sign-in) — keeps trying
+  past the cap at a reduced rate (from the 3rd failure 1 min, doubling to 1 h, at most 10 a day per device; in
+  process). Its tries aren't counted in the database. The install id is an identifier, not a secret (sent as
+  `X-Install-Id`, stored in `sessions`; never logged — the API logs route patterns, Nginx the default format): someone
+  who has it gains at most ~10 PIN guesses a day per API restart (1 in 10⁶ each), still behind the per-address
+  backoff — accepted; a signed app device token can replace it if that ever matters. A full in-process backoff table lets new keys through
+  (fail open) and logs a warning. Per address, at most 60 sign-ins per 10 min (429). There is no
   per-school sign-in limit: it would let one attacker close a whole school's login. A cancelled school → 423 after the secret verifies; a suspended school signs in
   read-only. Login revokes any session the client presents for the same school (no fixation); a token for another
   school is left to expire — it is under that school's RLS and can't be fixed onto this one.

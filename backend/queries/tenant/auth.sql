@@ -40,12 +40,22 @@ RETURNING fail_window_count;
 -- the transaction an id so its commit is flushed like a claim's, and the timing doesn't say whether the mobile exists.
 SELECT pg_current_xact_id();
 
+-- name: KnownDriverInstall :one
+-- Driver app PIN login, only once the daily cap is closed: has this install had a session for this user? Then it is
+-- the user's own phone and may keep trying at a reduced rate (docs/05 §10). Revoked and expired sessions count.
+SELECT EXISTS (SELECT 1 FROM sessions
+               WHERE user_id = @user_id AND client = 'driver_app' AND install_id = @install_id)::boolean;
+
 -- name: StaffLoginSucceeded :exec
--- Portal / driver app login: the secret verified; reset the run of failures and take this attempt (claimed up front)
--- back out of the daily count, so only failures count towards the cap. The window itself is kept (see
--- ClaimLoginAttempt). Unconditional on purpose: the row lock it takes serialises two logins of the same user, so
--- "one driver app session per user" holds even when two phones sign in at once.
-UPDATE users SET failed_logins = 0, fail_window_count = greatest(fail_window_count - 1, 0) WHERE id = @id;
+-- Portal / driver app login: the secret verified; reset the run of failures and, when this attempt was claimed up
+-- front (counted), take it back out of the daily count, so only failures count towards the cap. A known device's try
+-- past a closed cap was never counted, so nothing is taken back. The window itself is kept (see ClaimLoginAttempt).
+-- Unconditional on purpose: the row lock it takes serialises two logins of the same user, so "one driver app session
+-- per user" holds even when two phones sign in at once.
+UPDATE users
+SET failed_logins = 0,
+    fail_window_count = CASE WHEN @counted::boolean THEN greatest(fail_window_count - 1, 0) ELSE fail_window_count END
+WHERE id = @id;
 
 -- name: GuardianForLogin :one
 -- Parent app: after the OTP verifies, inside db.InTenant.

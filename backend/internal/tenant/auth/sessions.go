@@ -44,6 +44,8 @@ type Deps struct {
 	Origins []string
 	// OTP hashes parent-login codes and seals them for the SMS worker (derived from SECRETS_KEY).
 	OTP otp.Keys
+	// Device signs the portal's device cookie (derived from SECRETS_KEY); the zero value knows no browser (tests).
+	Device DeviceKeys
 	// Limits are the in-process per-IP limits and sign-in backoff; nil allows all (tests only).
 	Limits *Limits
 	// TrustedProxies: X-Forwarded-For is believed only from these peers (config.TrustedProxyPrefixes).

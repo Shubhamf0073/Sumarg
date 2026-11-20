@@ -599,7 +599,6 @@ type User struct {
 	PinHash          *string
 	MustChangeSecret bool
 	FailedLogins     int16
-	LockedUntil      *time.Time
 	IsActive         bool
 	Version          int32
 	CreatedAt        time.Time

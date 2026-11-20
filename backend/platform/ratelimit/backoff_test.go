@@ -106,3 +106,26 @@ func TestBackoffFailOpenAndSweep(t *testing.T) {
 		t.Fatal("idle entry not swept")
 	}
 }
+
+func TestBackoffOnFullOncePerMax(t *testing.T) {
+	b, c := newTestBackoff()
+	b.maxKeys = 1
+	calls := 0
+	b.OnFull(func() { calls++ })
+	b.Claim("a")
+	for _, k := range []string{"b", "c", "d"} {
+		b.Claim(k)
+	}
+	if calls != 1 {
+		t.Fatalf("onFull called %d times in one period, want 1", calls)
+	}
+	c.Advance(testPolicy.Max)
+	b.Claim("e")
+	if calls != 2 {
+		t.Fatalf("onFull called %d times after a period, want 2", calls)
+	}
+	b.Claim("a") // a tracked key never reports full
+	if calls != 2 {
+		t.Fatalf("onFull called for a tracked key")
+	}
+}

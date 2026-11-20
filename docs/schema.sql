@@ -268,7 +268,6 @@ CREATE TABLE users (                             -- school staff and crew (not p
     pin_hash               text,                         -- driver/attendant app: 6-digit PIN + device binding
     must_change_secret     boolean NOT NULL DEFAULT true,
     failed_logins          smallint NOT NULL DEFAULT 0,  -- in a row, since the last success (support view)
-    locked_until           timestamptz,                  -- unused since M1.2a (backoff is per address, in process); drop later
     is_active              boolean NOT NULL DEFAULT true,
     version                integer NOT NULL DEFAULT 1,
     created_at             timestamptz NOT NULL DEFAULT now(),
@@ -496,6 +495,7 @@ CREATE TABLE sessions (                            -- portal, driver app and par
     CONSTRAINT sessions_one_principal CHECK (num_nonnulls(user_id, guardian_id, platform_user_id) = 1)
 );
 CREATE INDEX sessions_guardian ON sessions (tenant_id, guardian_id) WHERE revoked_at IS NULL;
+CREATE INDEX sessions_user ON sessions (tenant_id, user_id, install_id) WHERE user_id IS NOT NULL; -- known driver install
 
 CREATE TABLE otp_challenges (                      -- parent login (SMS OTP); one live challenge per mobile
     id             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
@@ -45,6 +46,7 @@ type loginRequest struct {
 	Secret     string
 	InstallID  string // pin only
 	Presented  string // a token the client already holds: revoked, never reused (no fixation)
+	Device     string // password only: the browser's device cookie, if any (DeviceCookie)
 	IP         *netip.Addr
 	UserAgent  string
 }
@@ -52,6 +54,7 @@ type loginRequest struct {
 type loginResult struct {
 	Token     string
 	Principal Principal
+	Device    string // password only: a fresh device cookie value for this browser ("" = none)
 }
 
 // hashSem keeps Argon2 (19 MiB, ~50 ms each) to two at a time per process (.claude/rules/backend.md).
@@ -115,6 +118,7 @@ func login(ctx context.Context, d Deps, req loginRequest) (*loginResult, error) 
 	var user tenantq.StaffForLoginRow
 	var stored *string
 	eligible, capReached := false, false
+	deviceKey := "" // set when the daily cap is closed and a known device's try was claimed instead
 	if schoolFound {
 		err = d.DB.InTenant(ctx, school.TenantID, func(tx pgx.Tx) error {
 			q := tenantq.New(tx)
@@ -134,7 +138,17 @@ func login(ctx context.Context, d Deps, req loginRequest) (*loginResult, error) 
 				n, err := q.ClaimLoginAttempt(ctx, user.ID, loginFailuresPerDay)
 				switch {
 				case errors.Is(err, pgx.ErrNoRows):
-					eligible = false // the daily cap is reached
+					// The daily cap is reached: only the user's own phone or browser may keep trying, at a reduced
+					// rate, so failures from many addresses can't lock the real user out.
+					key, known, err := knownDevice(ctx, d, q, req, school.TenantID, user.ID)
+					if err != nil {
+						return err
+					}
+					if known && d.Limits.claimKnownDevice(key) {
+						deviceKey = key
+					} else {
+						eligible = false
+					}
 				case err != nil:
 					return err
 				case n == loginFailuresPerDay:
@@ -150,8 +164,8 @@ func login(ctx context.Context, d Deps, req loginRequest) (*loginResult, error) 
 			return nil, fmt.Errorf("auth: user: %w", err)
 		}
 	}
-	if capReached {
-		// Once per window: an operator should know someone is guessing (no mobile in the log).
+	if capReached && d.Limits.warnCap(school.TenantID, user.ID) {
+		// Once per user per window: an operator should know someone is guessing (no mobile in the log).
 		httpx.Logger(ctx).WarnContext(ctx, "login daily failure cap reached", slog.Int64("tenant_id", school.TenantID),
 			slog.Int64("user_id", user.ID))
 	}
@@ -171,15 +185,47 @@ func login(ctx context.Context, d Deps, req loginRequest) (*loginResult, error) 
 		return nil, badCreds
 	}
 	d.Limits.loginSucceeded(key)
+	if deviceKey != "" {
+		d.Limits.knownDeviceSucceeded(deviceKey)
+	}
 	// Only now, with the secret proven, does the school's status show (no oracle on school codes).
 	if school.Status == "cancelled" {
 		return nil, ErrSchoolClosed
 	}
-	return startSession(ctx, d, req, school, user)
+	res, err := startSession(ctx, d, req, school, user, deviceKey == "")
+	if err != nil {
+		return nil, err
+	}
+	if req.Kind == password { // this browser is now known for this user (a fresh cookie each time)
+		if res.Device, _, err = d.Device.issue(school.TenantID, user.ID); err != nil {
+			return nil, err
+		}
+	}
+	return res, nil
 }
 
+// knownDevice reports whether the try comes from a device this user has signed in on: for the driver app, an
+// install that has had a session; for the portal, a valid device cookie. key is the device's backoff key.
+func knownDevice(ctx context.Context, d Deps, q *tenantq.Queries, req loginRequest, tenantID, userID int64) (
+	string, bool, error) {
+	prefix := strconv.FormatInt(tenantID, 10) + "|" + strconv.FormatInt(userID, 10) + "|"
+	if req.Kind == pin {
+		if req.InstallID == "" {
+			return "", false, nil
+		}
+		ok, err := q.KnownDriverInstall(ctx, &userID, &req.InstallID)
+		if err != nil {
+			return "", false, fmt.Errorf("known install: %w", err)
+		}
+		return "pin|" + prefix + req.InstallID, ok, nil
+	}
+	id, ok := d.Device.known(req.Device, tenantID, userID)
+	return "web|" + prefix + id, ok, nil
+}
+
+// counted: this try was claimed against the daily cap (false for a known device's try past a closed cap).
 func startSession(ctx context.Context, d Deps, req loginRequest, school tenantq.TenantByCodeRow,
-	user tenantq.StaffForLoginRow) (*loginResult, error) {
+	user tenantq.StaffForLoginRow, counted bool) (*loginResult, error) {
 	client, lifetime := ClientWeb, float64(webSessionSecs)
 	var installID *string
 	if req.Kind == pin {
@@ -195,7 +241,7 @@ func startSession(ctx context.Context, d Deps, req loginRequest, school tenantq.
 	}}
 	err = d.DB.InTenant(ctx, school.TenantID, func(tx pgx.Tx) error {
 		q := tenantq.New(tx)
-		if err := q.StaffLoginSucceeded(ctx, user.ID); err != nil {
+		if err := q.StaffLoginSucceeded(ctx, counted, user.ID); err != nil {
 			return err
 		}
 		// A session the client already holds is ended, never upgraded (no fixation). Under RLS this only reaches

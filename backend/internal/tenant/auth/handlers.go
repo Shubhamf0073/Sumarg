@@ -164,6 +164,7 @@ func clientIP(remoteAddr, xff string, trusted []netip.Prefix) *netip.Addr {
 type portalLoginIn struct {
 	Origin    string `header:"Origin"`
 	Presented string `cookie:"__Host-sf_sid"`
+	Device    string `cookie:"__Host-sf_dev"`
 	Body      struct {
 		SchoolCode string `json:"school_code" pattern:"^[A-Za-z0-9-]{3,30}$"`
 		Mobile     string `json:"mobile" pattern:"^[6-9][0-9]{9}$"`
@@ -190,7 +191,7 @@ func portalLogin(ctx context.Context, in *portalLoginIn) (*portalLoginOut, error
 	}
 	res, err := login(ctx, d, loginRequest{
 		Kind: password, SchoolCode: in.Body.SchoolCode, Mobile: in.Body.Mobile, Secret: in.Body.Password,
-		Presented: in.Presented, IP: in.client.ip, UserAgent: in.client.userAgent,
+		Presented: in.Presented, Device: in.Device, IP: in.client.ip, UserAgent: in.client.userAgent,
 	})
 	if err != nil {
 		return nil, err
@@ -199,13 +200,17 @@ func portalLogin(ctx context.Context, in *portalLoginIn) (*portalLoginOut, error
 	if err != nil {
 		return nil, err
 	}
-	return &portalLoginOut{
+	out := &portalLoginOut{
 		SetCookie: []http.Cookie{
 			sessionCookie(res.Token, webSessionSecs),
 			csrfCookie(csrf, webSessionSecs),
 		},
 		Body: meFrom(&res.Principal),
-	}, nil
+	}
+	if res.Device != "" {
+		out.SetCookie = append(out.SetCookie, deviceCookie(res.Device))
+	}
+	return out, nil
 }
 
 func sessionCookie(v string, maxAge int) http.Cookie {
