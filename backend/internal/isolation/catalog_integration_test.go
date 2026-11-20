@@ -27,6 +27,9 @@ var noCompositeKey = map[string]string{
 // The only SECURITY DEFINER functions allowed (rules/sql.md; adding one needs an ADR line in docs/02).
 var securityDefiners = []string{"drop_old_position_partitions", "ensure_position_partitions", "tenant_by_code"}
 
+// The SECURITY DEFINER functions sf_app may execute; the rest are sf_platform-only.
+var appExecutable = []string{"tenant_by_code"}
+
 // Tables sf_app may reach that have no tenant_id column, and the policy column that scopes them instead.
 var scopedWithoutTenantID = map[string]string{"tenants": "(id = app_tenant())"}
 
@@ -137,6 +140,30 @@ func TestEveryPolicyScopesByTenant(t *testing.T) {
 			t.Errorf("%s.%s: USING %q WITH CHECK %q, want %q on both", table, r[1], qual, r[3], want)
 		}
 	}
+	// The USING text alone isn't enough: a policy FOR SELECT only, TO another role, or RESTRICTIVE (with no
+	// permissive one) leaves sf_app's other commands with a different — or no — scope. One shape for all.
+	for _, r := range q(`SELECT c.relname, p.polname, p.polpermissive::text, p.polcmd::text, p.polroles::text
+		FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid
+		WHERE c.relnamespace = 'public'::regnamespace
+		  AND NOT (p.polpermissive AND p.polcmd = '*' AND p.polroles = '{0}'::oid[]) ORDER BY 1, 2`) {
+		t.Errorf("%s.%s: permissive=%s cmd=%s roles=%s, want a permissive FOR ALL TO PUBLIC policy",
+			r[0], r[1], r[2], r[3], r[4])
+	}
+}
+
+// Views run as their owner unless security_invoker is set, so they would skip RLS; matviews can't have RLS at all.
+func TestAppReachesNoRLSBypassingView(t *testing.T) {
+	q := appConn(t)
+	for _, r := range q(`SELECT c.relname, c.relkind::text FROM pg_class c
+		WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('v','m')
+		  AND (c.relkind = 'm' OR NOT coalesce('security_invoker=true' = ANY (c.reloptions)
+		                                   OR 'security_invoker=on' = ANY (c.reloptions), false))
+		  AND (has_table_privilege(c.oid, 'SELECT,INSERT,UPDATE,DELETE')
+		       OR has_any_column_privilege(c.oid, 'SELECT,INSERT,UPDATE'))
+		ORDER BY 1`) {
+		t.Errorf("%s (relkind %s): sf_app can reach it and it bypasses RLS — use a view WITH (security_invoker)",
+			r[0], r[1])
+	}
 }
 
 // sf_app never deletes or truncates (invariant 4), and reaches positions only through the partitioned parent.
@@ -205,6 +232,14 @@ func TestCompositeKeys(t *testing.T) {
 		ORDER BY 1, 2`) {
 		t.Errorf("%s.%s → %s: FK between tenant tables without tenant_id on both sides", r[0], r[1], r[2])
 	}
+	// The exemption above holds only while nothing references those tables.
+	for _, r := range q(`SELECT k.conrelid::regclass::text, k.conname, k.confrelid::regclass::text
+		FROM pg_constraint k WHERE k.contype = 'f' AND k.connamespace = 'public'::regnamespace ORDER BY 1, 2`) {
+		if _, ok := noCompositeKey[r[2]]; ok {
+			t.Errorf("%s.%s → %s: FK to a table exempt from UNIQUE (tenant_id, id); add the key and a composite FK",
+				r[0], r[1], r[2])
+		}
+	}
 }
 
 func TestOnlyApprovedSecurityDefiners(t *testing.T) {
@@ -217,5 +252,19 @@ func TestOnlyApprovedSecurityDefiners(t *testing.T) {
 	if !slices.Equal(got, securityDefiners) {
 		t.Errorf("SECURITY DEFINER functions = %v, want %v (a new one needs the human's approval + docs/02 ADR)",
 			got, securityDefiners)
+	}
+	// Each pins search_path (else a caller's schema can shadow what it calls) and sf_app may run only the
+	// pre-tenant lookup — the partition functions create and drop tables for every school.
+	for _, r := range q(`SELECT proname,
+			EXISTS (SELECT 1 FROM unnest(proconfig) c WHERE c LIKE 'search_path=%')::text,
+			has_function_privilege(oid, 'EXECUTE')::text
+		FROM pg_proc WHERE prosecdef
+		  AND pronamespace NOT IN ('pg_catalog'::regnamespace, 'information_schema'::regnamespace) ORDER BY 1`) {
+		if r[1] != "true" {
+			t.Errorf("%s: SECURITY DEFINER without SET search_path", r[0])
+		}
+		if want := slices.Contains(appExecutable, r[0]); (r[2] == "true") != want {
+			t.Errorf("%s: sf_app EXECUTE=%s, want %t", r[0], r[2], want)
+		}
 	}
 }
