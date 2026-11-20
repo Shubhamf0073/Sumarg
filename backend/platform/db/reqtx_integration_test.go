@@ -19,12 +19,12 @@ import (
 )
 
 // resolveHeader is a test resolver: the tenant comes from a header. Real routes resolve it from the session.
-func resolveHeader(r *http.Request) (int64, bool, error) {
+func resolveHeader(r *http.Request) (db.Resolved, error) {
 	id, err := strconv.ParseInt(r.Header.Get("X-Test-Tenant"), 10, 64)
 	if err != nil {
-		return 0, false, httpx.ErrBadRequest
+		return db.Resolved{}, httpx.ErrBadRequest
 	}
-	return id, r.Header.Get("X-Test-Readonly") == "1", nil
+	return db.Resolved{TenantID: id, ReadOnly: r.Header.Get("X-Test-Readonly") == "1"}, nil
 }
 
 func do(h http.Handler, method string, tenant int64, readOnly bool) *httptest.ResponseRecorder {

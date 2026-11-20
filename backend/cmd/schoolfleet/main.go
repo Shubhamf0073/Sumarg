@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/config"
@@ -35,7 +34,7 @@ func main() {
 		OpenAPI:      openapi,
 		Public: func(r chi.Router) {
 			r.Get("/api/healthz", httpx.Healthz) // deploy smoke test and uptime monitor call this through Nginx
-			registerAPI(httpx.NewAPI(r, apiTitle, apiVersion))
+			// The huma operations are mounted by setup (Runtime.Routes): they need the database pools.
 		},
 	})
 }
@@ -44,11 +43,6 @@ const (
 	apiTitle   = "Sumarg API"
 	apiVersion = "1.0.0"
 )
-
-// registerAPI registers every huma operation. `schoolfleet openapi` calls it too, on a throwaway router, so it
-// must not need a database or config: services get their pools from request context, not from here.
-// M1+: register internal/{tenant,parent,driver}/* and internal/admin/* modules here.
-func registerAPI(api huma.API) {}
 
 // openapi renders the document `make gen-api` turns into TypeScript types for the portal and the app.
 func openapi() ([]byte, error) {
@@ -84,8 +78,10 @@ func setup(ctx context.Context, cfg config.Config, log *slog.Logger) (*app.Runti
 		appPool.Close() // Close is not called when Setup fails
 		return nil, fmt.Errorf("open platform pool: %w", err)
 	}
-	// appPool and platPool are handed to the routers in M1 (auth) and M3 (ingest); M0.3 only owns their lifecycle.
+	// platPool is handed to /api/admin (M1.4) and ingest (M3).
+	tenants := db.Bind(appPool)
 	return &app.Runtime{
+		Routes: func(r chi.Router) { mountAPI(r, tenants, cfg.PortalOrigins()) },
 		Ready: []httpx.Check{
 			{Name: "db-app", Fn: db.Ping(appPool)},
 			{Name: "db-platform", Fn: db.Ping(platPool)},

@@ -7,12 +7,90 @@ package tenantq
 
 import (
 	"context"
-	"time"
+	"net/netip"
 )
 
+const claimLoginAttempt = `-- name: ClaimLoginAttempt :one
+UPDATE users
+SET failed_logins = least(failed_logins + 1, 1000),
+    locked_until = CASE WHEN failed_logins + 1 >= 5
+                        THEN now() + make_interval(secs => least(30 * power(2, least(failed_logins + 1 - 5, 10)), 900))
+                   END
+WHERE id = $1 AND (locked_until IS NULL OR locked_until <= now())
+RETURNING id
+`
+
+// Portal / driver app login, before the secret is verified: count the attempt as a failure up front, atomically, and
+// only if no backoff window is open. No row = backing off. Parallel guesses therefore can't all slip in before the
+// 5th failure is recorded. From the 5th failure on, the next try waits 30 s, doubling up to 15 min (docs/05 §10).
+func (q *Queries) ClaimLoginAttempt(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, claimLoginAttempt, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
+const createSession = `-- name: CreateSession :one
+INSERT INTO sessions (tenant_id, token_hash, user_id, guardian_id, client, install_id, read_only, expires_at, ip, user_agent)
+VALUES (app_tenant(), $1, $2, $3, $4, $5,
+        $6, now() + make_interval(secs => $7::double precision), $8, $9)
+RETURNING id
+`
+
+type CreateSessionParams struct {
+	TokenHash    []byte
+	UserID       *int64
+	GuardianID   *int64
+	Client       string
+	InstallID    *string
+	ReadOnly     bool
+	LifetimeSecs float64
+	Ip           *netip.Addr
+	UserAgent    *string
+}
+
+// Portal / driver app / parent app login: a new session. Only the token's sha256 is stored.
+func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (int64, error) {
+	row := q.db.QueryRow(ctx, createSession,
+		arg.TokenHash,
+		arg.UserID,
+		arg.GuardianID,
+		arg.Client,
+		arg.InstallID,
+		arg.ReadOnly,
+		arg.LifetimeSecs,
+		arg.Ip,
+		arg.UserAgent,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const currentSchool = `-- name: CurrentSchool :one
+SELECT id, code, display_name FROM tenants WHERE id = app_tenant()
+`
+
+type CurrentSchoolRow struct {
+	ID          int64
+	Code        string
+	DisplayName string
+}
+
+// Login response: the school the session belongs to (RLS shows only the current tenant's row).
+func (q *Queries) CurrentSchool(ctx context.Context) (CurrentSchoolRow, error) {
+	row := q.db.QueryRow(ctx, currentSchool)
+	var i CurrentSchoolRow
+	err := row.Scan(&i.ID, &i.Code, &i.DisplayName)
+	return i, err
+}
+
 const getSession = `-- name: GetSession :one
-SELECT s.id, s.client, s.user_id, s.guardian_id, s.platform_user_id, s.install_id, s.read_only, s.last_seen_at,
-       s.expires_at, u.role AS user_role, u.campus_id AS user_campus_id, t.status AS tenant_status
+SELECT s.id, s.client, s.user_id, s.guardian_id, s.platform_user_id, s.install_id, s.read_only,
+       (s.last_seen_at < now() - interval '5 minutes')::boolean AS touch_due,
+       u.role AS user_role, u.campus_id AS user_campus_id, u.must_change_secret AS user_must_change_secret,
+       coalesce(u.name, g.name, '')::text AS principal_name,
+       t.status AS tenant_status, t.code AS tenant_code, t.display_name AS tenant_name
 FROM sessions s
 JOIN tenants t ON t.id = s.tenant_id
 LEFT JOIN users u ON u.tenant_id = s.tenant_id AND u.id = s.user_id
@@ -20,27 +98,31 @@ LEFT JOIN guardians g ON g.tenant_id = s.tenant_id AND g.id = s.guardian_id
 WHERE s.token_hash = $1
   AND s.revoked_at IS NULL
   AND s.expires_at > now()
+  AND (s.client <> 'web' OR s.last_seen_at > now() - interval '12 hours')
   AND (s.user_id IS NULL OR u.is_active)
   AND (s.guardian_id IS NULL OR g.app_enabled)
 `
 
 type GetSessionRow struct {
-	ID             int64
-	Client         string
-	UserID         *int64
-	GuardianID     *int64
-	PlatformUserID *int64
-	InstallID      *string
-	ReadOnly       bool
-	LastSeenAt     time.Time
-	ExpiresAt      time.Time
-	UserRole       *string
-	UserCampusID   *int64
-	TenantStatus   string
+	ID                   int64
+	Client               string
+	UserID               *int64
+	GuardianID           *int64
+	PlatformUserID       *int64
+	InstallID            *string
+	ReadOnly             bool
+	TouchDue             bool
+	UserRole             *string
+	UserCampusID         *int64
+	UserMustChangeSecret *bool
+	PrincipalName        string
+	TenantStatus         string
+	TenantCode           string
+	TenantName           string
 }
 
 // Every authenticated request, inside db.InTenant(tenant id parsed from the token): a forged tenant id finds no
-// row under RLS → 401. Validity is enforced here, not in Go.
+// row under RLS → 401. Validity is enforced here, not in Go: portal sessions also end after 12 h idle.
 // TODO(support-sessions): platform_user_id sessions are not checked here (sf_app cannot read platform_users).
 // When support sessions are built: give them a short expires_at and revoke them in the same platform
 // transaction that deactivates the platform user or revokes their platform session.
@@ -55,11 +137,14 @@ func (q *Queries) GetSession(ctx context.Context, tokenHash []byte) (GetSessionR
 		&i.PlatformUserID,
 		&i.InstallID,
 		&i.ReadOnly,
-		&i.LastSeenAt,
-		&i.ExpiresAt,
+		&i.TouchDue,
 		&i.UserRole,
 		&i.UserCampusID,
+		&i.UserMustChangeSecret,
+		&i.PrincipalName,
 		&i.TenantStatus,
+		&i.TenantCode,
+		&i.TenantName,
 	)
 	return i, err
 }
@@ -88,8 +173,40 @@ func (q *Queries) GuardianForLogin(ctx context.Context, mobile string) (Guardian
 	return i, err
 }
 
+const revokeDriverAppSessions = `-- name: RevokeDriverAppSessions :exec
+UPDATE sessions SET revoked_at = now()
+WHERE user_id = $1 AND client = 'driver_app' AND revoked_at IS NULL
+`
+
+// Driver app PIN login: one active app session per crew user, so a new phone logs the old one out (docs/05 §10).
+func (q *Queries) RevokeDriverAppSessions(ctx context.Context, userID *int64) error {
+	_, err := q.db.Exec(ctx, revokeDriverAppSessions, userID)
+	return err
+}
+
+const revokeSession = `-- name: RevokeSession :exec
+UPDATE sessions SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL
+`
+
+// Logout: the signed-in session.
+func (q *Queries) RevokeSession(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, revokeSession, id)
+	return err
+}
+
+const revokeSessionByHash = `-- name: RevokeSessionByHash :exec
+UPDATE sessions SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL
+`
+
+// Logout, and login presented with an old session (no fixation).
+func (q *Queries) RevokeSessionByHash(ctx context.Context, tokenHash []byte) error {
+	_, err := q.db.Exec(ctx, revokeSessionByHash, tokenHash)
+	return err
+}
+
 const staffForLogin = `-- name: StaffForLogin :one
-SELECT id, name, role, campus_id, password_hash, pin_hash, must_change_secret, failed_logins, locked_until, is_active
+SELECT id, name, role, campus_id, password_hash, pin_hash, must_change_secret, failed_logins, is_active,
+       (locked_until IS NOT NULL AND locked_until > now())::boolean AS backing_off
 FROM users
 WHERE mobile = $1
 `
@@ -103,11 +220,12 @@ type StaffForLoginRow struct {
 	PinHash          *string
 	MustChangeSecret bool
 	FailedLogins     int16
-	LockedUntil      *time.Time
 	IsActive         bool
+	BackingOff       bool
 }
 
-// Portal / driver app login step 2, inside db.InTenant(tenant from step 1).
+// Portal / driver app login step 2, inside db.InTenant(tenant from step 1). backing_off: the backoff window after
+// repeated failures is still open (decided by the database clock, like every other session time).
 func (q *Queries) StaffForLogin(ctx context.Context, mobile string) (StaffForLoginRow, error) {
 	row := q.db.QueryRow(ctx, staffForLogin, mobile)
 	var i StaffForLoginRow
@@ -120,10 +238,22 @@ func (q *Queries) StaffForLogin(ctx context.Context, mobile string) (StaffForLog
 		&i.PinHash,
 		&i.MustChangeSecret,
 		&i.FailedLogins,
-		&i.LockedUntil,
 		&i.IsActive,
+		&i.BackingOff,
 	)
 	return i, err
+}
+
+const staffLoginSucceeded = `-- name: StaffLoginSucceeded :exec
+UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = $1
+`
+
+// Portal / driver app login: the secret verified; forget the failures (including the one claimed for this attempt).
+// Unconditional on purpose: the row lock it takes serialises two logins of the same user, so "one driver app
+// session per user" holds even when two phones sign in at once.
+func (q *Queries) StaffLoginSucceeded(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, staffLoginSucceeded, id)
+	return err
 }
 
 const tenantByCode = `-- name: TenantByCode :one
@@ -149,10 +279,14 @@ func (q *Queries) TenantByCode(ctx context.Context, code string) (TenantByCodeRo
 }
 
 const touchSession = `-- name: TouchSession :exec
-UPDATE sessions SET last_seen_at = now() WHERE id = $1 AND revoked_at IS NULL
+UPDATE sessions
+SET last_seen_at = now(),
+    expires_at = CASE WHEN client = 'web' THEN expires_at ELSE now() + interval '90 days' END
+WHERE id = $1 AND revoked_at IS NULL
 `
 
-// Throttled by the caller: only when last_seen_at is older than 5 minutes.
+// Every authenticated request, at most once per 5 minutes (touch_due). App sessions are renewed for 90 days on use;
+// portal sessions keep their 7-day absolute end.
 func (q *Queries) TouchSession(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, touchSession, id)
 	return err

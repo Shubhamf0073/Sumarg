@@ -27,6 +27,7 @@ func production() map[string]string {
 		"SMS_PROVIDER": "msg91", "SMS_API_KEY": smsKey, "SMS_SENDER_ID": "PREVIA", "SMS_DLT_PE_ID": "1101",
 		"SMS_DLT_TEMPLATE_OTP":    "1107",
 		"GOOGLE_MAPS_BROWSER_KEY": "browser-key", "GOOGLE_MAPS_SERVER_KEY": mapsSrvKey,
+		"APP_DOMAIN": "sumarg.example.com",
 	}
 }
 
@@ -84,6 +85,9 @@ func TestInvalidConfigNamesTheVariable(t *testing.T) {
 		{"placeholder secrets key", with(production(), "SECRETS_KEY", "__GENERATE_KEY__"), "SECRETS_KEY must be 64 hex"},
 		{"zero secrets key in production", with(production(), "SECRETS_KEY", strings.Repeat("0", 64)), "all zeros"},
 		{"zero secrets key in staging", with(production(), "APP_ENV", "staging", "SECRETS_KEY", strings.Repeat("0", 64)), "all zeros"},
+		{"missing app domain", with(production(), "APP_DOMAIN", "-"), "APP_DOMAIN is required"},
+		{"app domain with scheme", with(production(), "APP_DOMAIN", "https://sumarg.example.com"), "APP_DOMAIN must be a bare host"},
+		{"app domain with port", with(production(), "APP_DOMAIN", "sumarg.example.com:443"), "APP_DOMAIN must be a bare host"},
 		{"bad mqtt port", with(production(), "MQTT_PORT", "70000"), "MQTT_PORT"},
 		{"plain mqtt in production", with(production(), "MQTT_PLAIN_PORT", "1883"), "MQTT_PLAIN_PORT is a local-development port"},
 		{"plain port equals tls port", with(local(), "MQTT_PLAIN_PORT", "8883"), "MQTT_PLAIN_PORT must differ"},

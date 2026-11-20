@@ -13,8 +13,8 @@ import (
 // transaction is never opened).
 func TestRequestTxResolverError(t *testing.T) {
 	called := false
-	h := RequestTx(nil, func(*http.Request) (int64, bool, error) {
-		return 0, false, httpx.NewError(http.StatusUnauthorized, "unauthenticated", "Sign in.")
+	h := RequestTx(nil, func(*http.Request) (Resolved, error) {
+		return Resolved{}, httpx.NewError(http.StatusUnauthorized, "unauthenticated", "Sign in.")
 	})(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
 
 	rec := httptest.NewRecorder()

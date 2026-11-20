@@ -83,6 +83,9 @@ partition); trip paths, boardings, alerts kept for the package term + 1 year; `l
 - Parent OTP: 6 digits, 5 min, max 5 attempts, max 3 OTPs per mobile per hour and 10 per school per minute; same
   response for unknown mobiles (no oracle) — only invited guardians receive an SMS.
 - Driver PIN: 6 digits, exponential backoff after 5 failures, reset by an admin.
+- Backoff (passwords and PINs): from the 5th failure the next try waits 30 s, doubling to 15 min; during backoff even
+  the right secret gets the same 401. A cancelled school → 423 after the secret verifies; a suspended school signs in
+  read-only. Login revokes any session the client presents (no fixation).
 - Support view: Previa support gets a 30-min read-only session (`InTenantReadOnly`), shown in the school's audit.
 
 ## 11. Packages and billing (Previa → school)

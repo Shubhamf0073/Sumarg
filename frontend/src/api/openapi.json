@@ -1,10 +1,523 @@
 {
   "components": {
-    "schemas": {}
+    "schemas": {
+      "APIError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "description": "Stable machine-readable code, snake_case; clients switch on it",
+            "examples": [
+              "not_found"
+            ],
+            "type": "string"
+          },
+          "fields": {
+            "description": "Validation errors only",
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "message": {
+            "description": "Safe to show a user",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Quote this when reporting a problem",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "FieldError": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "description": "What is wrong with it",
+            "type": "string"
+          },
+          "path": {
+            "description": "Where the problem is, e.g. body.name or query.limit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "message"
+        ],
+        "type": "object"
+      },
+      "GuardianBody": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "MeBody": {
+        "additionalProperties": false,
+        "properties": {
+          "client": {
+            "enum": [
+              "web",
+              "driver_app",
+              "parent_app"
+            ],
+            "type": "string"
+          },
+          "guardian": {
+            "$ref": "#/components/schemas/GuardianBody",
+            "description": "parent"
+          },
+          "read_only": {
+            "description": "suspended school or Previa support view: writes are refused",
+            "type": "boolean"
+          },
+          "school": {
+            "$ref": "#/components/schemas/SchoolBody"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserBody",
+            "description": "school staff or crew"
+          }
+        },
+        "required": [
+          "client",
+          "school",
+          "read_only"
+        ],
+        "type": "object"
+      },
+      "PinLoginInBody": {
+        "additionalProperties": false,
+        "properties": {
+          "install_id": {
+            "description": "random id the app made at install; send it as X-Install-Id on every request",
+            "pattern": "^[A-Za-z0-9-]{16,64}$",
+            "type": "string"
+          },
+          "mobile": {
+            "pattern": "^[6-9][0-9]{9}$",
+            "type": "string"
+          },
+          "pin": {
+            "pattern": "^[0-9]{6}$",
+            "type": "string"
+          },
+          "school_code": {
+            "pattern": "^[A-Za-z0-9-]{3,30}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "school_code",
+          "mobile",
+          "pin",
+          "install_id"
+        ],
+        "type": "object"
+      },
+      "PinLoginOutBody": {
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "description": "send as Authorization: Bearer \u003ctoken\u003e; keep it in expo-secure-store",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "type": "object"
+      },
+      "PortalLoginInBody": {
+        "additionalProperties": false,
+        "properties": {
+          "mobile": {
+            "pattern": "^[6-9][0-9]{9}$",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "school_code": {
+            "pattern": "^[A-Za-z0-9-]{3,30}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "school_code",
+          "mobile",
+          "password"
+        ],
+        "type": "object"
+      },
+      "SchoolBody": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name"
+        ],
+        "type": "object"
+      },
+      "UserBody": {
+        "additionalProperties": false,
+        "properties": {
+          "campus_id": {
+            "description": "null = all campuses",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "must_change_secret": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "admin",
+              "transport_manager",
+              "driver",
+              "attendant"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "role",
+          "campus_id",
+          "must_change_secret"
+        ],
+        "type": "object"
+      }
+    }
   },
   "info": {
     "title": "Sumarg API",
     "version": "1.0.0"
   },
-  "openapi": "3.1.0"
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/auth/app/pin": {
+      "post": {
+        "operationId": "auth-pin",
+        "parameters": [
+          {
+            "description": "an earlier token on this install, if any: it is revoked",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "an earlier token on this install, if any: it is revoked",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PinLoginInBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PinLoginOutBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "423": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Locked"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Driver/attendant app sign-in: school code, mobile and PIN → bearer token bound to the install",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "operationId": "auth-login",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Origin",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "__Host-sf_sid",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortalLoginInBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "423": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Locked"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Portal sign-in: school code, mobile and password → session cookie",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "auth-logout",
+        "responses": {
+          "204": {
+            "description": "No Content",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Sign out: ends this session",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/me": {
+      "get": {
+        "operationId": "auth-me",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Who is signed in (decides the app's tab set and the portal's menu)",
+        "tags": [
+          "auth"
+        ]
+      }
+    }
+  }
 }

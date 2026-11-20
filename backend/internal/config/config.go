@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -38,6 +39,10 @@ type Config struct {
 	// sf_platform (BYPASSRLS): only /api/admin, the worker and ingest use it (invariant 2).
 	PlatformDatabaseURL base.Secret `env:"PLATFORM_DATABASE_URL,required,notEmpty"`
 	PlatformDBMaxConns  int32       `env:"PLATFORM_DB_MAX_CONNS" envDefault:"3"`
+
+	// AppDomain is the portal's host (sumarg.previasoftwares.com). Cookie-authenticated writes and the portal login
+	// must carry Origin https://<AppDomain> (CSRF, docs/05 §10). Locally the Vite dev origin is accepted too.
+	AppDomain string `env:"APP_DOMAIN"`
 
 	// SecretsKey encrypts secrets stored in the database (64 hex characters = 32 bytes).
 	SecretsKey base.Secret `env:"SECRETS_KEY,required,notEmpty"`
@@ -89,9 +94,36 @@ func (c Config) Validate() error {
 	}
 
 	errs = append(errs, c.validateSecretsKey(local), c.validateMQTT(local), c.validateSMS(local),
-		c.validatePush(local), c.validateMaps(local))
+		c.validatePush(local), c.validateMaps(local), c.validateAppDomain(local))
 	return errors.Join(errs...)
 }
+
+// PortalOrigins are the Origin values accepted on portal login and cookie-authenticated writes.
+func (c Config) PortalOrigins() []string {
+	var out []string
+	if c.AppDomain != "" {
+		out = append(out, "https://"+c.AppDomain)
+	}
+	if c.AppEnv == base.EnvLocal {
+		out = append(out, "http://localhost:5173", "http://127.0.0.1:5173") // make web (Vite)
+	}
+	return out
+}
+
+func (c Config) validateAppDomain(local bool) error {
+	if c.AppDomain == "" {
+		if local {
+			return nil
+		}
+		return fmt.Errorf("APP_DOMAIN is required when APP_ENV=%s", c.AppEnv)
+	}
+	if !appDomainRE.MatchString(c.AppDomain) {
+		return errors.New("APP_DOMAIN must be a bare host name such as sumarg.example.com (no scheme, port or path)")
+	}
+	return nil
+}
+
+var appDomainRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
 
 func (c Config) validateSecretsKey(local bool) error {
 	raw := c.SecretsKey.Reveal()

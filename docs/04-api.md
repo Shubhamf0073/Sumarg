@@ -6,7 +6,7 @@ Machine contract = OpenAPI 3.1 built by huma from the Go handlers; `make gen-api
 
 | Topic | Rule |
 |---|---|
-| Auth | Portal: cookie `__Host-sf_sid` + CSRF. Apps: `Authorization: Bearer <tenant_id>.<token>` (no cookies, no CSRF). Admin: `__Host-sf_admin` (passkey). |
+| Auth | Portal: cookie `__Host-sf_sid` + CSRF (writes carry `Origin` and `X-CSRF-Token` = cookie `__Host-sf_csrf`). Apps: `Authorization: Bearer <tenant_id>.<token>` **and** `X-Install-Id: <install_id>` on every request (device binding; no cookies, no CSRF). A portal token as bearer, or an app token as cookie → 401. Admin: `__Host-sf_admin` (passkey). |
 | Errors | flat `{"code","message","request_id","fields"?}` (`fields` = `[{"path","message"}]`, validation errors only); out-of-scope ids → 404 `not_found` |
 | Paging | `?limit=50&after=<cursor>` → `{items, next}` (limit+1) |
 | Idempotency | Manual marks, incidents, SOS from the app carry `Idempotency-Key` |
@@ -20,7 +20,9 @@ Machine contract = OpenAPI 3.1 built by huma from the Go handlers; `make gen-api
 | POST | `/auth/app/otp` | parent step 1: `{school_code, mobile}` → 202 always (no oracle) |
 | POST | `/auth/app/otp/verify` | `{school_code, mobile, code, install_id}` → `{token, guardian, school}` |
 | POST | `/auth/push-token` | `{platform, fcm_token, app_version}` |
-| POST | `/auth/logout` · GET `/me` | |
+| POST | `/auth/logout` · GET `/me` | logout → 204 (works for read-only sessions); `/me` → `{client, user?, guardian?, school, read_only}` |
+
+Auth errors: 401 `bad_credentials` (one body for unknown school, unknown mobile, wrong secret, wrong kind of account, backoff), 401 `unauthenticated` (no/invalid/expired session), 403 `csrf_failed`, 423 `school_closed` (cancelled school, shown only after the secret verifies).
 
 ## Parent app (`/parent`)
 | Method | Path | Notes |

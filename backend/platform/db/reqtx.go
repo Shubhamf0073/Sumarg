@@ -39,7 +39,16 @@ func TxFrom(ctx context.Context) (pgx.Tx, bool) {
 // A resolver that needs the database (the session lookup under RLS, docs/02 §5) runs its own short InTenantReadOnly
 // and finishes it before returning, so it is over before the request transaction begins: one request never holds
 // two connections at once. The tenant it uses is the one in the session cookie; never a body, query or path value.
-type Resolver func(r *http.Request) (tenantID int64, readOnly bool, err error)
+type Resolver func(r *http.Request) (Resolved, error)
+
+// Resolved is what a Resolver found. Ctx, if set, replaces the request's context for the handler: it must derive
+// from r.Context() and is where the resolver leaves what it learned (e.g. the session's principal), so the handler
+// needn't look the session up a second time.
+type Resolved struct {
+	TenantID int64
+	ReadOnly bool
+	Ctx      context.Context
+}
 
 // RequestTx runs each request in one tenant transaction on pool (docs/02 §5).
 //
@@ -57,11 +66,15 @@ type Resolver func(r *http.Request) (tenantID int64, readOnly bool, err error)
 func RequestTx(pool *pgxpool.Pool, resolve Resolver) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			tenantID, readOnly, err := resolve(r)
+			res, err := resolve(r)
 			if err != nil {
 				httpx.WriteError(w, r, err)
 				return
 			}
+			if res.Ctx != nil {
+				r = r.WithContext(res.Ctx)
+			}
+			tenantID, readOnly := res.TenantID, res.ReadOnly
 			if safeMethod(r.Method) {
 				readOnly = true
 			}

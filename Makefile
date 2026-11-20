@@ -10,7 +10,8 @@ DB_PORT ?= 5434
 DEV_PW ?= dev
 db_url = postgres://$(1):$(DEV_PW)@localhost:$(DB_PORT)/$(2)?sslmode=disable
 export APP_ENV ?= local
-export APP_DOMAIN ?= localhost:5173
+# APP_DOMAIN unset locally: the portal origin is the Vite dev server (config.PortalOrigins)
+export APP_DOMAIN ?=
 export LOG_FORMAT ?= text
 export SECRETS_KEY ?= 0000000000000000000000000000000000000000000000000000000000000000
 export FILES_DIR ?= $(CURDIR)/.data/files

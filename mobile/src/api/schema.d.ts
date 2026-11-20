@@ -3,10 +3,150 @@
  * Do not make direct changes to the file.
  */
 
-export type paths = Record<string, never>;
+export interface paths {
+    "/api/auth/app/pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Driver/attendant app sign-in: school code, mobile and PIN → bearer token bound to the install */
+        post: operations["auth-pin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Portal sign-in: school code, mobile and password → session cookie */
+        post: operations["auth-login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sign out: ends this session */
+        post: operations["auth-logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Who is signed in (decides the app's tab set and the portal's menu) */
+        get: operations["auth-me"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+}
 export type webhooks = Record<string, never>;
 export interface components {
-    schemas: never;
+    schemas: {
+        APIError: {
+            /**
+             * @description Stable machine-readable code, snake_case; clients switch on it
+             * @example not_found
+             */
+            code: string;
+            /** @description Validation errors only */
+            fields?: components["schemas"]["FieldError"][] | null;
+            /** @description Safe to show a user */
+            message: string;
+            /** @description Quote this when reporting a problem */
+            request_id?: string;
+        };
+        FieldError: {
+            /** @description What is wrong with it */
+            message: string;
+            /** @description Where the problem is, e.g. body.name or query.limit */
+            path: string;
+        };
+        GuardianBody: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+        };
+        MeBody: {
+            /** @enum {string} */
+            client: "web" | "driver_app" | "parent_app";
+            /** @description parent */
+            guardian?: components["schemas"]["GuardianBody"];
+            /** @description suspended school or Previa support view: writes are refused */
+            read_only: boolean;
+            school: components["schemas"]["SchoolBody"];
+            /** @description school staff or crew */
+            user?: components["schemas"]["UserBody"];
+        };
+        PinLoginInBody: {
+            /** @description random id the app made at install; send it as X-Install-Id on every request */
+            install_id: string;
+            mobile: string;
+            pin: string;
+            school_code: string;
+        };
+        PinLoginOutBody: {
+            /** @description send as Authorization: Bearer <token>; keep it in expo-secure-store */
+            token: string;
+        };
+        PortalLoginInBody: {
+            mobile: string;
+            password: string;
+            school_code: string;
+        };
+        SchoolBody: {
+            code: string;
+            /** Format: int64 */
+            id: number;
+            name: string;
+        };
+        UserBody: {
+            /**
+             * Format: int64
+             * @description null = all campuses
+             */
+            campus_id: number | null;
+            /** Format: int64 */
+            id: number;
+            must_change_secret: boolean;
+            name: string;
+            /** @enum {string} */
+            role: "owner" | "admin" | "transport_manager" | "driver" | "attendant";
+        };
+    };
     responses: never;
     parameters: never;
     requestBodies: never;
@@ -14,4 +154,226 @@ export interface components {
     pathItems: never;
 }
 export type $defs = Record<string, never>;
-export type operations = Record<string, never>;
+export interface operations {
+    "auth-pin": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description an earlier token on this install, if any: it is revoked */
+                Authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PinLoginInBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PinLoginOutBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Locked */
+            423: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "auth-login": {
+        parameters: {
+            query?: never;
+            header?: {
+                Origin?: string;
+            };
+            path?: never;
+            cookie?: {
+                "__Host-sf_sid"?: string;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalLoginInBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Locked */
+            423: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "auth-logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "auth-me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+}
