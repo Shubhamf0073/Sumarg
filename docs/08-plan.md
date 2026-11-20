@@ -30,7 +30,9 @@ and its host tests, Expo app config.
   closed for 24 h via the 50/day cap — let a known device (driver install with a past session; a portal device
   cookie) through at a reduced rate; log once when the in-process backoff table is full (fail-open); before deploy,
   `docker network inspect` that 172.30.231.0/24 doesn't overlap Cargo, and after it check sessions record real IPs
-  (docs/06 §1); drop `users.locked_until` (contract, needs approval); M1.4 adds `ADMIN_SESSION_HOURS` back to
+  (docs/06 §1) — if the hop isn't `172.30.231.1`, every client shares one per-IP bucket (60 sign-ins/10 min for
+  all); the daily-cap warning can log twice in one window (a success takes 1 off the count) — log once per window
+  or accept; drop `users.locked_until` (contract, needs approval); M1.4 adds `ADMIN_SESSION_HOURS` back to
   `.env.example` when it is read
 - [ ] M1.4 Admin passkeys (copy Cargo), onboarding wizard (school, campuses, settings, owner, package) **[review]** —
   moving a school to `live` sets `go_live_on` to today (IST) if empty, in the same save (the OTP launch window,
