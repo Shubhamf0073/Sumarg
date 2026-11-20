@@ -20,7 +20,8 @@ and its host tests, Expo app config.
 - [x] M0.5 Portal skeleton (demo CSS, router, `/admin` lazy) and Expo app skeleton (expo-router, auth stack, two tab sets, API client) — `npx expo install --fix` — portal: tsc/biome/build green, `/admin` lazy chunk; app: tsc/biome/jest green, expo install --fix only bumped react-native 0.81.5; no sign-in or real screens yet (M1.2+)
 
 ### M1 — Tenancy, auth, onboarding (2.5 d)
-- [ ] M1.1 Isolation suite: catalog check (every tenant table forced RLS, no DELETE grant), parent-scope walker (every `/parent/*` route with another guardian's ids → 404) **[opus] [review]**
+- [x] M1.1 Isolation suite: catalog check (every tenant table forced RLS, no DELETE grant), parent-scope walker (every `/parent/*` route with another guardian's ids → 404) **[opus] [review]** — `internal/isolation`: catalog check (also role not super/bypassrls/owner, UNIQUE (tenant_id, id), composite FKs both sides, SECURITY DEFINER allowlist; verified by injecting faults) + walker with self-tests; real walk in `cmd/schoolfleet` finds 0 parent ops until M1.2 wires `Auth`/middleware
+- [ ] M1.1a Isolation follow-ups (review minors): sf_app reaches no view/matview without `security_invoker`; partition functions not executable by sf_app + `search_path` set; no FK targets a `noCompositeKey` table; policy `polroles`/`polcmd`/permissive checked; M1.2 must wire walker `Auth` and keep the positive control mandatory
 - [ ] M1.2 Portal login + sessions (copy Cargo auth), driver PIN login with install binding **[opus] [review]**
 - [ ] M1.3 Parent OTP login (SMS gateway adapter + stub), rate limits, 90-day app sessions, push-token registration **[opus] [review]**
 - [ ] M1.4 Admin passkeys (copy Cargo), onboarding wizard (school, campuses, settings, owner, package) **[review]**
