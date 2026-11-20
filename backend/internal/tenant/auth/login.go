@@ -106,45 +106,47 @@ func login(ctx context.Context, d Deps, req loginRequest) (*loginResult, error) 
 		return nil, fmt.Errorf("auth: school: %w", err)
 	}
 
+	// One read-write transaction on every path in a known school: look the user up and, if they may sign in this
+	// way, claim the attempt (counted as a failure until it succeeds; the backoff check and the count are one
+	// statement, so parallel guesses can't all get past the 5th failure). When nothing is claimed, the transaction is
+	// still given an id so its commit costs the same: the timing doesn't reveal which mobiles are staff. (An unknown
+	// school code skips this; school codes are printed on invite links and QR codes, so they aren't secret.)
 	var user tenantq.StaffForLoginRow
-	userFound := false
+	var stored *string
+	eligible := false
 	if schoolFound {
-		err = d.DB.InTenantReadOnly(ctx, school.TenantID, func(tx pgx.Tx) error {
+		err = d.DB.InTenant(ctx, school.TenantID, func(tx pgx.Tx) error {
+			q := tenantq.New(tx)
 			var err error
-			user, err = tenantq.New(tx).StaffForLogin(ctx, req.Mobile)
-			if errors.Is(err, pgx.ErrNoRows) {
-				return nil
+			user, err = q.StaffForLogin(ctx, req.Mobile)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
 			}
-			userFound = err == nil
-			return err
+			if err == nil {
+				stored = user.PasswordHash
+				if req.Kind == pin {
+					stored = user.PinHash
+				}
+				eligible = user.IsActive && !user.BackingOff && roleFits(req.Kind, user.Role) && stored != nil
+			}
+			if eligible {
+				_, err := q.ClaimLoginAttempt(ctx, user.ID)
+				if errors.Is(err, pgx.ErrNoRows) {
+					eligible = false // another attempt just opened a backoff window
+				} else if err != nil {
+					return err
+				}
+			}
+			if !eligible {
+				return q.AssignXactID(ctx)
+			}
+			return nil
 		})
 		if err != nil {
 			return nil, fmt.Errorf("auth: user: %w", err)
 		}
 	}
-
-	stored := user.PasswordHash
-	if req.Kind == pin {
-		stored = user.PinHash
-	}
-	// eligible: there is a real hash to check and the account may sign in this way right now. Otherwise the dummy
-	// hash is verified and the answer is the same 401, after the same work.
-	eligible := userFound && user.IsActive && !user.BackingOff && roleFits(req.Kind, user.Role) && stored != nil
-	if eligible {
-		// Claim the attempt before verifying (counted as a failure until it succeeds): the backoff check and the
-		// count are one statement, so parallel guesses can't all get past the 5th failure.
-		err = d.DB.InTenant(ctx, school.TenantID, func(tx pgx.Tx) error {
-			_, err := tenantq.New(tx).ClaimLoginAttempt(ctx, user.ID)
-			if errors.Is(err, pgx.ErrNoRows) {
-				eligible = false // another attempt just opened a backoff window
-				return nil
-			}
-			return err
-		})
-		if err != nil {
-			return nil, fmt.Errorf("auth: claim attempt: %w", err)
-		}
-	}
+	// Not eligible: the dummy hash is verified and the answer is the same 401, after the same work.
 	encoded, err := dummyHash()
 	if err != nil {
 		return nil, fmt.Errorf("auth: dummy hash: %w", err)

@@ -10,6 +10,17 @@ import (
 	"net/netip"
 )
 
+const assignXactID = `-- name: AssignXactID :exec
+SELECT pg_current_xact_id()
+`
+
+// Portal / driver app login, when no attempt was claimed (unknown mobile, wrong kind of account, backing off): give
+// the transaction an id so its commit is flushed like a claim's, and the timing doesn't say whether the mobile exists.
+func (q *Queries) AssignXactID(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, assignXactID)
+	return err
+}
+
 const claimLoginAttempt = `-- name: ClaimLoginAttempt :one
 UPDATE users
 SET failed_logins = least(failed_logins + 1, 1000),

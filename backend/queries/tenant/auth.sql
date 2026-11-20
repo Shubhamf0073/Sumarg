@@ -31,6 +31,11 @@ SET failed_logins = least(failed_logins + 1, 1000),
 WHERE id = @id AND (locked_until IS NULL OR locked_until <= now())
 RETURNING id;
 
+-- name: AssignXactID :exec
+-- Portal / driver app login, when no attempt was claimed (unknown mobile, wrong kind of account, backing off): give
+-- the transaction an id so its commit is flushed like a claim's, and the timing doesn't say whether the mobile exists.
+SELECT pg_current_xact_id();
+
 -- name: StaffLoginSucceeded :exec
 -- Portal / driver app login: the secret verified; forget the failures (including the one claimed for this attempt).
 -- Unconditional on purpose: the row lock it takes serialises two logins of the same user, so "one driver app
