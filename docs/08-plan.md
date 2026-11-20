@@ -49,7 +49,7 @@ and its host tests, Expo app config.
 - [ ] M4.1 Live board (portal) + `/parent/live` + `/crew/trips/{id}/live` from memory
 - [ ] M4.2 Trip start/end rules (app, unit, geofence), trip_stops arrival/departure, learned offsets, ETA **[review]**
 - [ ] M4.3 Alerts engine: overspeed, deviation, late start, delay, offline, power cut, tamper, not dropped **[review]**
-- [ ] M4.4 Worker: FCM HTTP v1 sender (service account), dedupe, backoff, token cleanup, language templates en/gu/hi **[review]**
+- [ ] M4.4 Worker: FCM HTTP v1 sender (service account), dedupe, backoff, token cleanup, language templates en/gu/hi **[review]** — **decide first (human):** iOS rows in `push_tokens` hold the raw **APNs** device token (`expo-notifications` `getDevicePushTokenAsync`), which FCM can't deliver to — either add the Firebase iOS messaging SDK to the app so iOS registers an FCM token (new dependency → `/add-dependency`, ADR A10 note), or send iOS via APNs HTTP/2 directly with the `.p8` key (second sender path, changes A10). Push only to tokens whose session is live (M1.3a).
 - [ ] M4.5 SOS end to end (unit + app) with siren on the portal and repeat until ack **[review]**
 
 ### M5 — Mobile app (3 d, lane 2 from M1)
