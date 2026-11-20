@@ -8,10 +8,9 @@ SELECT f.tenant_id::bigint AS tenant_id, f.status::text AS status
 FROM tenant_by_code(@code::text) AS f(tenant_id, status);
 
 -- name: StaffForLogin :one
--- Portal / driver app login step 2, inside db.InTenant(tenant from step 1). backing_off: the backoff window after
--- repeated failures is still open (decided by the database clock, like every other session time).
-SELECT id, name, role, campus_id, password_hash, pin_hash, must_change_secret, failed_logins, is_active,
-       (locked_until IS NOT NULL AND locked_until > now())::boolean AS backing_off
+-- Portal / driver app login step 2, inside db.InTenant(tenant from step 1). The backoff per address is in the API
+-- process; the daily cap over every address is decided by ClaimLoginAttempt.
+SELECT id, name, role, campus_id, password_hash, pin_hash, must_change_secret, failed_logins, is_active
 FROM users
 WHERE mobile = @mobile;
 
@@ -21,15 +20,20 @@ SELECT id, code, display_name FROM tenants WHERE id = app_tenant();
 
 -- name: ClaimLoginAttempt :one
 -- Portal / driver app login, before the secret is verified: count the attempt as a failure up front, atomically, and
--- only if no backoff window is open. No row = backing off. Parallel guesses therefore can't all slip in before the
--- 5th failure is recorded. From the 5th failure on, the next try waits 30 s, doubling up to 15 min (docs/05 §10).
+-- only while the user's daily cap over every address isn't reached (docs/05 §10). No row = capped: every try,
+-- even the right secret, gets the same 401 until the 24 h window ends. Parallel guesses can't exceed the cap.
+-- A success takes its own attempt back out (StaffLoginSucceeded) but doesn't reset the window, so a sign-in doesn't
+-- hand an attacker a fresh budget.
 UPDATE users
 SET failed_logins = least(failed_logins + 1, 1000),
-    locked_until = CASE WHEN failed_logins + 1 >= 5
-                        THEN now() + make_interval(secs => least(30 * power(2, least(failed_logins + 1 - 5, 10)), 900))
-                   END
-WHERE id = @id AND (locked_until IS NULL OR locked_until <= now())
-RETURNING id;
+    fail_window_start = CASE WHEN fail_window_start IS NULL OR fail_window_start <= now() - interval '24 hours'
+                             THEN now() ELSE fail_window_start END,
+    fail_window_count = CASE WHEN fail_window_start IS NULL OR fail_window_start <= now() - interval '24 hours'
+                             THEN 1 ELSE fail_window_count + 1 END
+WHERE id = @id
+  AND (fail_window_start IS NULL OR fail_window_start <= now() - interval '24 hours'
+       OR fail_window_count < @max_per_day::smallint)
+RETURNING fail_window_count;
 
 -- name: AssignXactID :exec
 -- Portal / driver app login, when no attempt was claimed (unknown mobile, wrong kind of account, backing off): give
@@ -37,10 +41,11 @@ RETURNING id;
 SELECT pg_current_xact_id();
 
 -- name: StaffLoginSucceeded :exec
--- Portal / driver app login: the secret verified; forget the failures (including the one claimed for this attempt).
--- Unconditional on purpose: the row lock it takes serialises two logins of the same user, so "one driver app
--- session per user" holds even when two phones sign in at once.
-UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = @id;
+-- Portal / driver app login: the secret verified; reset the run of failures and take this attempt (claimed up front)
+-- back out of the daily count, so only failures count towards the cap. The window itself is kept (see
+-- ClaimLoginAttempt). Unconditional on purpose: the row lock it takes serialises two logins of the same user, so
+-- "one driver app session per user" holds even when two phones sign in at once.
+UPDATE users SET failed_logins = 0, fail_window_count = greatest(fail_window_count - 1, 0) WHERE id = @id;
 
 -- name: GuardianForLogin :one
 -- Parent app: after the OTP verifies, inside db.InTenant.

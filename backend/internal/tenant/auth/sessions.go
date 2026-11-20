@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strings"
 
@@ -43,8 +44,10 @@ type Deps struct {
 	Origins []string
 	// OTP hashes parent-login codes and seals them for the SMS worker (derived from SECRETS_KEY).
 	OTP otp.Keys
-	// Limits are the per-IP limits of the parent OTP endpoints; nil allows all.
+	// Limits are the in-process per-IP limits and sign-in backoff; nil allows all (tests only).
 	Limits *Limits
+	// TrustedProxies: X-Forwarded-For is believed only from these peers (config.TrustedProxyPrefixes).
+	TrustedProxies []netip.Prefix
 }
 
 type depsKey struct{}

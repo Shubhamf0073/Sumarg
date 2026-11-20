@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -116,9 +117,9 @@ func meFrom(p *Principal) MeBody {
 }
 
 // clientInfo is filled from the connection, not the body. Nginx overwrites X-Forwarded-For with the real client IP
-// (infra/nginx/snippets/schoolfleet-proxy.conf), and the API publishes on 127.0.0.1 only (infra/docker-compose.yml),
-// so the header is trusted because nothing but Nginx can reach the API (docs/06). It is stored on the session for
-// the audit view and keys the per-IP OTP limits. Trusting it only from the Nginx hop is M1.2a.
+// (infra/nginx/snippets/schoolfleet-proxy.conf); the header is believed only when the connection itself comes from
+// the Nginx hop (Deps.TrustedProxies), so a client that reaches the API another way can't choose its own address.
+// It is stored on the session for the audit view and keys the per-IP sign-in limits.
 type clientInfo struct {
 	ip        *netip.Addr
 	userAgent string
@@ -126,14 +127,36 @@ type clientInfo struct {
 
 func (c *clientInfo) resolve(ctx huma.Context) {
 	c.userAgent = ctx.Header("User-Agent")
-	host := ctx.Header("X-Forwarded-For")
-	if host == "" {
-		host, _, _ = net.SplitHostPort(ctx.RemoteAddr())
+	var trusted []netip.Prefix
+	if d, err := depsFrom(ctx.Context()); err == nil {
+		trusted = d.TrustedProxies
 	}
-	if a, err := netip.ParseAddr(host); err == nil {
-		a = a.Unmap()
-		c.ip = &a
+	c.ip = clientIP(ctx.RemoteAddr(), ctx.Header("X-Forwarded-For"), trusted)
+}
+
+// clientIP is the peer's address, or, when the peer is a trusted proxy, the last X-Forwarded-For entry (the one
+// that proxy wrote; anything before it came from the client). nil when neither parses.
+func clientIP(remoteAddr, xff string, trusted []netip.Prefix) *netip.Addr {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
 	}
+	peer, err := netip.ParseAddr(host)
+	if err != nil {
+		return nil
+	}
+	peer = peer.Unmap()
+	if xff != "" && slices.ContainsFunc(trusted, func(p netip.Prefix) bool { return p.Contains(peer) }) {
+		last := xff
+		if i := strings.LastIndexByte(xff, ','); i >= 0 {
+			last = xff[i+1:]
+		}
+		if a, err := netip.ParseAddr(strings.TrimSpace(last)); err == nil {
+			a = a.Unmap()
+			return &a
+		}
+	}
+	return &peer
 }
 
 // ── portal login ──

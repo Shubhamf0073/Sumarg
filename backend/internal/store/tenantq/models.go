@@ -603,6 +603,8 @@ type User struct {
 	IsActive         bool
 	Version          int32
 	CreatedAt        time.Time
+	FailWindowStart  *time.Time
+	FailWindowCount  int16
 }
 
 type Vehicle struct {

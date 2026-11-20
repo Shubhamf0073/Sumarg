@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/store/tenantq"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/argon2id"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/httpx"
+	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/ratelimit"
 )
 
 // Session lifetimes (docs/05 §10). Portal idle (12 h) is enforced in GetSession; app sessions renew on use.
@@ -89,6 +91,16 @@ func login(ctx context.Context, d Deps, req loginRequest) (*loginResult, error) 
 	if req.Kind == pin {
 		badCreds = errBadPIN
 	}
+	if !d.Limits.allow(func(l *Limits) *ratelimit.Limiter { return l.login }, req.IP) {
+		return nil, ErrRateLimited
+	}
+	// Backoff per school code + mobile + address, claimed before any work (counted as a failure until it succeeds,
+	// so parallel guesses can't all get past the 5th). Every mobile, staff or not, backs off the same way, so the
+	// quick refusal says nothing about which mobiles are staff.
+	key := loginKey(req.SchoolCode, req.Mobile, req.IP)
+	if !d.Limits.claimLogin(key) {
+		return nil, badCreds
+	}
 
 	school, schoolFound, err := schoolByCode(ctx, d, req.SchoolCode)
 	if err != nil {
@@ -96,13 +108,13 @@ func login(ctx context.Context, d Deps, req loginRequest) (*loginResult, error) 
 	}
 
 	// One read-write transaction on every path in a known school: look the user up and, if they may sign in this
-	// way, claim the attempt (counted as a failure until it succeeds; the backoff check and the count are one
-	// statement, so parallel guesses can't all get past the 5th failure). When nothing is claimed, the transaction is
-	// still given an id so its commit costs the same: the timing doesn't reveal which mobiles are staff. (An unknown
-	// school code skips this; school codes are printed on invite links and QR codes, so they aren't secret.)
+	// way, claim the attempt against the user's daily cap over every address (counted as a failure until it
+	// succeeds; the check and the count are one statement). When nothing is claimed, the transaction is still given
+	// an id so its commit costs the same: the timing doesn't reveal which mobiles are staff. (An unknown school code
+	// skips this; school codes are printed on invite links and QR codes, so they aren't secret.)
 	var user tenantq.StaffForLoginRow
 	var stored *string
-	eligible := false
+	eligible, capReached := false, false
 	if schoolFound {
 		err = d.DB.InTenant(ctx, school.TenantID, func(tx pgx.Tx) error {
 			q := tenantq.New(tx)
@@ -116,14 +128,17 @@ func login(ctx context.Context, d Deps, req loginRequest) (*loginResult, error) 
 				if req.Kind == pin {
 					stored = user.PinHash
 				}
-				eligible = user.IsActive && !user.BackingOff && roleFits(req.Kind, user.Role) && stored != nil
+				eligible = user.IsActive && roleFits(req.Kind, user.Role) && stored != nil
 			}
 			if eligible {
-				_, err := q.ClaimLoginAttempt(ctx, user.ID)
-				if errors.Is(err, pgx.ErrNoRows) {
-					eligible = false // another attempt just opened a backoff window
-				} else if err != nil {
+				n, err := q.ClaimLoginAttempt(ctx, user.ID, loginFailuresPerDay)
+				switch {
+				case errors.Is(err, pgx.ErrNoRows):
+					eligible = false // the daily cap is reached
+				case err != nil:
 					return err
+				case n == loginFailuresPerDay:
+					capReached = true // this try is the last one the window allows
 				}
 			}
 			if !eligible {
@@ -134,6 +149,11 @@ func login(ctx context.Context, d Deps, req loginRequest) (*loginResult, error) 
 		if err != nil {
 			return nil, fmt.Errorf("auth: user: %w", err)
 		}
+	}
+	if capReached {
+		// Once per window: an operator should know someone is guessing (no mobile in the log).
+		httpx.Logger(ctx).WarnContext(ctx, "login daily failure cap reached", slog.Int64("tenant_id", school.TenantID),
+			slog.Int64("user_id", user.ID))
 	}
 	// Not eligible: the dummy hash is verified and the answer is the same 401, after the same work.
 	encoded, err := dummyHash()
@@ -150,6 +170,7 @@ func login(ctx context.Context, d Deps, req loginRequest) (*loginResult, error) 
 	if !eligible || !ok {
 		return nil, badCreds
 	}
+	d.Limits.loginSucceeded(key)
 	// Only now, with the secret proven, does the school's status show (no oracle on school codes).
 	if school.Status == "cancelled" {
 		return nil, ErrSchoolClosed

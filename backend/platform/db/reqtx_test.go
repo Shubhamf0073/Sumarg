@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,6 +26,31 @@ func TestRequestTxResolverError(t *testing.T) {
 	}
 	if called {
 		t.Fatal("handler ran without a tenant")
+	}
+}
+
+// A resolver's Ctx must derive from the request's context; one that doesn't is a 500 before any transaction (no
+// pool is needed), and the handler never runs.
+func TestRequestTxResolvedCtxMustDerive(t *testing.T) {
+	type k struct{}
+	for name, tc := range map[string]struct {
+		ctx  func(r *http.Request) context.Context
+		want int
+	}{
+		"background":    {func(*http.Request) context.Context { return context.WithValue(context.Background(), k{}, 1) }, http.StatusInternalServerError},
+		"other request": {func(*http.Request) context.Context { return httptest.NewRequest(http.MethodGet, "/", nil).Context() }, http.StatusInternalServerError},
+	} {
+		t.Run(name, func(t *testing.T) {
+			called := false
+			h := RequestTx(nil, func(r *http.Request) (Resolved, error) {
+				return Resolved{TenantID: 1, Ctx: tc.ctx(r)}, nil
+			})(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/x", nil))
+			if rec.Code != tc.want || called {
+				t.Fatalf("got %d (handler ran: %t), want %d", rec.Code, called, tc.want)
+			}
+		})
 	}
 }
 

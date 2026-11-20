@@ -24,21 +24,26 @@ func (q *Queries) AssignXactID(ctx context.Context) error {
 const claimLoginAttempt = `-- name: ClaimLoginAttempt :one
 UPDATE users
 SET failed_logins = least(failed_logins + 1, 1000),
-    locked_until = CASE WHEN failed_logins + 1 >= 5
-                        THEN now() + make_interval(secs => least(30 * power(2, least(failed_logins + 1 - 5, 10)), 900))
-                   END
-WHERE id = $1 AND (locked_until IS NULL OR locked_until <= now())
-RETURNING id
+    fail_window_start = CASE WHEN fail_window_start IS NULL OR fail_window_start <= now() - interval '24 hours'
+                             THEN now() ELSE fail_window_start END,
+    fail_window_count = CASE WHEN fail_window_start IS NULL OR fail_window_start <= now() - interval '24 hours'
+                             THEN 1 ELSE fail_window_count + 1 END
+WHERE id = $1
+  AND (fail_window_start IS NULL OR fail_window_start <= now() - interval '24 hours'
+       OR fail_window_count < $2::smallint)
+RETURNING fail_window_count
 `
 
 // Portal / driver app login, before the secret is verified: count the attempt as a failure up front, atomically, and
-// only if no backoff window is open. No row = backing off. Parallel guesses therefore can't all slip in before the
-// 5th failure is recorded. From the 5th failure on, the next try waits 30 s, doubling up to 15 min (docs/05 §10).
-func (q *Queries) ClaimLoginAttempt(ctx context.Context, id int64) (int64, error) {
-	row := q.db.QueryRow(ctx, claimLoginAttempt, id)
-	var id_2 int64
-	err := row.Scan(&id_2)
-	return id_2, err
+// only while the user's daily cap over every address isn't reached (docs/05 §10). No row = capped: every try,
+// even the right secret, gets the same 401 until the 24 h window ends. Parallel guesses can't exceed the cap.
+// A success takes its own attempt back out (StaffLoginSucceeded) but doesn't reset the window, so a sign-in doesn't
+// hand an attacker a fresh budget.
+func (q *Queries) ClaimLoginAttempt(ctx context.Context, iD int64, maxPerDay int16) (int16, error) {
+	row := q.db.QueryRow(ctx, claimLoginAttempt, iD, maxPerDay)
+	var fail_window_count int16
+	err := row.Scan(&fail_window_count)
+	return fail_window_count, err
 }
 
 const consumeOTP = `-- name: ConsumeOTP :exec
@@ -364,8 +369,7 @@ func (q *Queries) RevokeSessionByHash(ctx context.Context, tokenHash []byte) err
 }
 
 const staffForLogin = `-- name: StaffForLogin :one
-SELECT id, name, role, campus_id, password_hash, pin_hash, must_change_secret, failed_logins, is_active,
-       (locked_until IS NOT NULL AND locked_until > now())::boolean AS backing_off
+SELECT id, name, role, campus_id, password_hash, pin_hash, must_change_secret, failed_logins, is_active
 FROM users
 WHERE mobile = $1
 `
@@ -380,11 +384,10 @@ type StaffForLoginRow struct {
 	MustChangeSecret bool
 	FailedLogins     int16
 	IsActive         bool
-	BackingOff       bool
 }
 
-// Portal / driver app login step 2, inside db.InTenant(tenant from step 1). backing_off: the backoff window after
-// repeated failures is still open (decided by the database clock, like every other session time).
+// Portal / driver app login step 2, inside db.InTenant(tenant from step 1). The backoff per address is in the API
+// process; the daily cap over every address is decided by ClaimLoginAttempt.
 func (q *Queries) StaffForLogin(ctx context.Context, mobile string) (StaffForLoginRow, error) {
 	row := q.db.QueryRow(ctx, staffForLogin, mobile)
 	var i StaffForLoginRow
@@ -398,18 +401,18 @@ func (q *Queries) StaffForLogin(ctx context.Context, mobile string) (StaffForLog
 		&i.MustChangeSecret,
 		&i.FailedLogins,
 		&i.IsActive,
-		&i.BackingOff,
 	)
 	return i, err
 }
 
 const staffLoginSucceeded = `-- name: StaffLoginSucceeded :exec
-UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = $1
+UPDATE users SET failed_logins = 0, fail_window_count = greatest(fail_window_count - 1, 0) WHERE id = $1
 `
 
-// Portal / driver app login: the secret verified; forget the failures (including the one claimed for this attempt).
-// Unconditional on purpose: the row lock it takes serialises two logins of the same user, so "one driver app
-// session per user" holds even when two phones sign in at once.
+// Portal / driver app login: the secret verified; reset the run of failures and take this attempt (claimed up front)
+// back out of the daily count, so only failures count towards the cap. The window itself is kept (see
+// ClaimLoginAttempt). Unconditional on purpose: the row lock it takes serialises two logins of the same user, so
+// "one driver app session per user" holds even when two phones sign in at once.
 func (q *Queries) StaffLoginSucceeded(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, staffLoginSucceeded, id)
 	return err

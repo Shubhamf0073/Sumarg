@@ -40,7 +40,23 @@ const (
 	// by a real phone; it stops one session from filling push_tokens with retired rows.
 	pushTokensPerSession = 20
 	pushTokenWindow      = time.Hour
+
+	// Staff / crew sign-in (docs/05 §10). A school's office or a bus depot puts its staff behind one IP, so the
+	// per-IP request limit is loose; it is answered with 429, which says nothing about the mobile.
+	loginsPerIP   = 60
+	loginIPWindow = 10 * time.Minute
 )
+
+// loginBackoff is per school code + mobile + client address, so an attacker's failures slow down only the
+// attacker's address. The database adds a per-user cap over all addresses (loginFailuresPerDay), so guessing stays
+// bounded however many addresses are used; locking a user out takes loginFailuresPerDay/PerDay addresses at once.
+var loginBackoff = ratelimit.BackoffPolicy{
+	Free: 5, Base: 30 * time.Second, Max: 15 * time.Minute, PerDay: 10, Day: 24 * time.Hour,
+}
+
+// loginFailuresPerDay is the database cap per user over every address (ClaimLoginAttempt). For a 6-digit PIN that
+// is one chance in 20,000 a day.
+const loginFailuresPerDay = 50
 
 var (
 	errBadCode = httpx.NewError(http.StatusUnauthorized, "bad_credentials",
@@ -50,18 +66,36 @@ var (
 		"Too many tries. Please wait a few minutes and try again.")
 )
 
-// Limits are the in-process per-IP limiters of the unauthenticated parent endpoints. A nil *Limits allows all.
+// Limits are the in-process per-IP limiters of the unauthenticated endpoints and the sign-in backoff. A nil *Limits
+// allows all.
 type Limits struct {
 	otpRequest, otpVerify *ratelimit.Limiter
+	login                 *ratelimit.Limiter // portal password and driver PIN, per IP
+	loginBackoff          *ratelimit.Backoff // per school code + mobile + IP
 	pushToken             *ratelimit.Limiter // keyed by session id
 }
 
 // NewLimits returns the per-IP and per-session limits for one API process.
 func NewLimits(c clock.Clock) *Limits {
 	return &Limits{
-		otpRequest: ratelimit.New(c, otpRequestsPerIP, otpIPWindow),
-		otpVerify:  ratelimit.New(c, otpVerifiesPerIP, otpIPWindow),
-		pushToken:  ratelimit.New(c, pushTokensPerSession, pushTokenWindow),
+		otpRequest:   ratelimit.New(c, otpRequestsPerIP, otpIPWindow),
+		otpVerify:    ratelimit.New(c, otpVerifiesPerIP, otpIPWindow),
+		login:        ratelimit.New(c, loginsPerIP, loginIPWindow),
+		loginBackoff: ratelimit.NewBackoff(c, loginBackoff),
+		pushToken:    ratelimit.New(c, pushTokensPerSession, pushTokenWindow),
+	}
+}
+
+// loginKey: the school code as typed (lower-cased) so an unknown school or mobile backs off exactly like a known one.
+func loginKey(schoolCode, mobile string, ip *netip.Addr) string {
+	return strings.ToLower(schoolCode) + "|" + mobile + "|" + ratelimit.IPKey(ip)
+}
+
+func (l *Limits) claimLogin(key string) bool { return l == nil || l.loginBackoff.Claim(key) }
+
+func (l *Limits) loginSucceeded(key string) {
+	if l != nil {
+		l.loginBackoff.Succeeded(key)
 	}
 }
 

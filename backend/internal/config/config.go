@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/netip"
 	"regexp"
 	"slices"
 	"strings"
@@ -43,6 +44,12 @@ type Config struct {
 	// AppDomain is the portal's host (sumarg.previasoftwares.com). Cookie-authenticated writes and the portal login
 	// must carry Origin https://<AppDomain> (CSRF, docs/05 §10). Locally the Vite dev origin is accepted too.
 	AppDomain string `env:"APP_DOMAIN"`
+
+	// TrustedProxies are the addresses (CIDR) of the reverse-proxy hop in front of the API: Nginx, as seen from
+	// inside the container (the compose network's gateway, infra/docker-compose.yml). X-Forwarded-For is believed
+	// only on a connection from one of these; otherwise the connection's own address is the client's. Required
+	// outside APP_ENV=local: without it every client would share the gateway address and its per-IP limits.
+	TrustedProxies []string `env:"TRUSTED_PROXIES" envSeparator:","`
 
 	// SecretsKey encrypts secrets stored in the database (64 hex characters = 32 bytes).
 	SecretsKey base.Secret `env:"SECRETS_KEY,required,notEmpty"`
@@ -94,8 +101,39 @@ func (c Config) Validate() error {
 	}
 
 	errs = append(errs, c.validateSecretsKey(local), c.validateMQTT(local), c.validateSMS(local),
-		c.validatePush(local), c.validateMaps(local), c.validateAppDomain(local))
+		c.validatePush(local), c.validateMaps(local), c.validateAppDomain(local), c.validateTrustedProxies(local))
 	return errors.Join(errs...)
+}
+
+// TrustedProxyPrefixes parses TRUSTED_PROXIES (already checked by Validate).
+func (c Config) TrustedProxyPrefixes() []netip.Prefix {
+	out := make([]netip.Prefix, 0, len(c.TrustedProxies))
+	for _, s := range c.TrustedProxies {
+		if p, err := netip.ParsePrefix(strings.TrimSpace(s)); err == nil {
+			out = append(out, p.Masked())
+		}
+	}
+	return out
+}
+
+func (c Config) validateTrustedProxies(local bool) error {
+	if len(c.TrustedProxies) == 0 {
+		if local {
+			return nil
+		}
+		return fmt.Errorf("TRUSTED_PROXIES is required when APP_ENV=%s (the Nginx hop as seen by the API, e.g. 172.30.231.1/32)", c.AppEnv)
+	}
+	for _, s := range c.TrustedProxies {
+		p, err := netip.ParsePrefix(strings.TrimSpace(s))
+		if err != nil {
+			return errors.New("TRUSTED_PROXIES must be a comma-separated list of CIDR prefixes such as 172.30.231.1/32")
+		}
+		// A wide prefix would let a client on the internet pick its own address for the per-IP limits.
+		if (p.Addr().Is4() && p.Bits() < 16) || (p.Addr().Is6() && p.Bits() < 64) {
+			return errors.New("TRUSTED_PROXIES prefixes must be narrow (at least /16 for IPv4, /64 for IPv6)")
+		}
+	}
+	return nil
 }
 
 // PortalOrigins are the Origin values accepted on portal login and cookie-authenticated writes.

@@ -96,7 +96,8 @@ func setup(ctx context.Context, cfg config.Config, log *slog.Logger) (*app.Runti
 	inPlatform := func(ctx context.Context, fn func(pgx.Tx) error) error {
 		return platformdb.InPlatform(ctx, platPool, fn)
 	}
-	deps := auth.Deps{DB: db.Bind(appPool), Origins: cfg.PortalOrigins(), OTP: keys, Limits: auth.NewLimits(clock.System{})}
+	deps := auth.Deps{DB: db.Bind(appPool), Origins: cfg.PortalOrigins(), OTP: keys, Limits: auth.NewLimits(clock.System{}),
+		TrustedProxies: cfg.TrustedProxyPrefixes()}
 	return &app.Runtime{
 		Routes: func(r chi.Router) { mountAPI(r, deps) },
 		Workers: []func(context.Context) error{

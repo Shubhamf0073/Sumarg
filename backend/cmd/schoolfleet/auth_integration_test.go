@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -21,6 +22,7 @@ import (
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/tenant/auth"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/worker"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/argon2id"
+	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/clock"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/config"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/db"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/db/platformdb"
@@ -38,11 +40,12 @@ const (
 
 // authEnv is the real API (mountAPI on the sf_app pool) plus the platform pool for seeding and inspecting rows.
 type authEnv struct {
-	h    http.Handler
-	keys otp.Keys
-	plat worker.InPlatform
-	exec func(t *testing.T, sql string, args ...any)
-	q    func(t *testing.T, sql string, dst any, args ...any)
+	h     http.Handler
+	clock *clock.Fake // the API process's clock (rate limits, sign-in backoff); the database keeps its own
+	keys  otp.Keys
+	plat  worker.InPlatform
+	exec  func(t *testing.T, sql string, args ...any)
+	q     func(t *testing.T, sql string, dst any, args ...any)
 }
 
 type school struct {
@@ -98,8 +101,9 @@ func newAuthEnv(t *testing.T) (*authEnv, school, school) {
 
 	keys := testOTPKeys(t)
 	r := chi.NewRouter()
-	mountAPI(r, auth.Deps{DB: db.Bind(app), Origins: []string{testOrigin}, OTP: keys})
-	env := &authEnv{h: r, keys: keys,
+	fake := clock.NewFake(time.Date(2026, 11, 21, 8, 0, 0, 0, time.UTC))
+	mountAPI(r, auth.Deps{DB: db.Bind(app), Origins: []string{testOrigin}, OTP: keys, Limits: auth.NewLimits(fake)})
+	env := &authEnv{h: r, clock: fake, keys: keys,
 		plat: func(ctx context.Context, fn func(pgx.Tx) error) error { return platformdb.InPlatform(ctx, plat, fn) }}
 	env.exec = func(t *testing.T, sql string, args ...any) {
 		t.Helper()
@@ -133,6 +137,7 @@ type call struct {
 	body         any
 	headers      map[string]string
 	cookies      []*http.Cookie
+	remote       string // the client's address; httptest's 192.0.2.1 by default
 }
 
 type resp struct {
@@ -152,6 +157,9 @@ func (e *authEnv) do(t *testing.T, c call) resp {
 		body = strings.NewReader("")
 	}
 	req := httptest.NewRequest(c.method, c.path, body)
+	if c.remote != "" {
+		req.RemoteAddr = c.remote + ":40000"
+	}
 	if c.body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -321,38 +329,139 @@ func TestPortalLoginOrigin(t *testing.T) {
 }
 
 func TestPortalBackoff(t *testing.T) {
-	e, a, _ := newAuthEnv(t)
+	e, a, b := newAuthEnv(t)
 	for i := range 5 {
 		wantCode(t, fmt.Sprintf("wrong %d", i+1), e.do(t, portalLoginCall(a.code, ownerMobile, "wrong")),
 			http.StatusUnauthorized, "bad_credentials")
 	}
-	// Backing off: even the right password gets the same 401, and doesn't extend the wait.
+	// Backing off: even the right password gets the same 401.
 	wantCode(t, "right during backoff", e.do(t, portalLoginCall(a.code, ownerMobile, ownerPass)),
 		http.StatusUnauthorized, "bad_credentials")
+	// The same mobile in the other school is another account: not slowed down.
+	wantCode(t, "other school", e.do(t, portalLoginCall(b.code, ownerMobile, ownerPass)), http.StatusOK, "")
 	var failed int
 	e.q(t, `SELECT failed_logins FROM users WHERE id = $1`, &failed, a.ownerID)
 	if failed != 5 {
-		t.Fatalf("failed_logins = %d, want 5", failed)
+		t.Fatalf("failed_logins = %d, want 5 (the try during backoff is not counted)", failed)
 	}
-	var secs float64
-	e.q(t, `SELECT extract(epoch FROM locked_until - now()) FROM users WHERE id = $1`, &secs, a.ownerID)
-	if secs < 20 || secs > 31 {
-		t.Fatalf("backoff = %.0f s, want ~30", secs)
-	}
-	// The window passes: the right password works and the count resets.
-	e.exec(t, `UPDATE users SET locked_until = now() - interval '1 second' WHERE id = $1`, a.ownerID)
+	// The 30 s window passes: the right password works and the run of failures resets.
+	e.clock.Advance(29 * time.Second)
+	wantCode(t, "1 s early", e.do(t, portalLoginCall(a.code, ownerMobile, ownerPass)),
+		http.StatusUnauthorized, "bad_credentials")
+	e.clock.Advance(time.Second)
 	wantCode(t, "after backoff", e.do(t, portalLoginCall(a.code, ownerMobile, ownerPass)), http.StatusOK, "")
 	e.q(t, `SELECT failed_logins FROM users WHERE id = $1`, &failed, a.ownerID)
 	if failed != 0 {
 		t.Fatalf("failed_logins after success = %d", failed)
 	}
-	// Doubling, capped at 15 minutes.
-	e.exec(t, `UPDATE users SET failed_logins = 30, locked_until = NULL WHERE id = $1`, a.ownerID)
-	e.do(t, portalLoginCall(a.code, ownerMobile, "wrong"))
-	e.q(t, `SELECT extract(epoch FROM locked_until - now()) FROM users WHERE id = $1`, &secs, a.ownerID)
-	if secs < 890 || secs > 901 {
-		t.Fatalf("capped backoff = %.0f s, want 900", secs)
+	// The daily count keeps the 5 failures but not the success.
+	var day int
+	e.q(t, `SELECT fail_window_count FROM users WHERE id = $1`, &day, a.ownerID)
+	if day != 5 {
+		t.Fatalf("fail_window_count after success = %d, want 5", day)
 	}
+}
+
+// An attacker's failures slow down only the attacker's address: the owner, from their own address, still signs in.
+func TestBackoffIsPerAddress(t *testing.T) {
+	e, a, _ := newAuthEnv(t)
+	const attacker, owner = "203.0.113.66", "198.51.100.10"
+	for range 8 {
+		c := portalLoginCall(a.code, ownerMobile, "wrong")
+		c.remote = attacker
+		e.do(t, c)
+	}
+	c := portalLoginCall(a.code, ownerMobile, ownerPass)
+	c.remote = attacker
+	wantCode(t, "right password from the attacker's address", e.do(t, c), http.StatusUnauthorized, "bad_credentials")
+	c.remote = owner
+	wantCode(t, "owner's own address", e.do(t, c), http.StatusOK, "")
+}
+
+// One address gets at most 10 failures a day per mobile; every address together at most 50 per user, after which
+// every try, even the right secret from a clean address, gets the same 401 until the 24 h window ends.
+func TestLoginDailyCaps(t *testing.T) {
+	e, a, b := newAuthEnv(t)
+	guess := func(ip string) resp {
+		c := pinCall(a.code, driverMobile, "000000", installOne)
+		c.remote = ip
+		return e.do(t, c)
+	}
+	// One address, patiently past every backoff window: 10 failures, then closed for the day.
+	for range 30 {
+		guess("203.0.113.1")
+		e.clock.Advance(15 * time.Minute)
+	}
+	var count int
+	e.q(t, `SELECT fail_window_count FROM users WHERE id = $1`, &count, a.driverID)
+	if count != 10 {
+		t.Fatalf("one address counted %d failures, want 10", count)
+	}
+	// Four more addresses reach the user's cap of 50.
+	for i := 2; i <= 5; i++ {
+		for range 10 {
+			guess(fmt.Sprintf("203.0.113.%d", i))
+			e.clock.Advance(15 * time.Minute)
+		}
+	}
+	e.q(t, `SELECT fail_window_count FROM users WHERE id = $1`, &count, a.driverID)
+	if count != 50 {
+		t.Fatalf("fail_window_count = %d, want 50", count)
+	}
+	c := pinCall(a.code, driverMobile, driverPIN, installOne)
+	c.remote = "198.51.100.10"
+	wantCode(t, "right PIN after the daily cap", e.do(t, c), http.StatusUnauthorized, "bad_credentials")
+	e.q(t, `SELECT fail_window_count FROM users WHERE id = $1`, &count, a.driverID)
+	if count != 50 {
+		t.Fatalf("a capped try was counted: %d", count)
+	}
+	// The other school's driver with the same mobile is untouched.
+	wantCode(t, "other school", e.do(t, pinCall(b.code, driverMobile, driverPIN, installOne)), http.StatusOK, "")
+	// The window ends (database clock): the right PIN works.
+	e.exec(t, `UPDATE users SET fail_window_start = now() - interval '24 hours' WHERE id = $1`, a.driverID)
+	c.remote = "198.51.100.11"
+	wantCode(t, "next day", e.do(t, c), http.StatusOK, "")
+}
+
+// Too many sign-ins from one address are answered 429, which says nothing about the mobile.
+func TestLoginPerIPLimit(t *testing.T) {
+	e, a, _ := newAuthEnv(t)
+	var last resp
+	for i := range 61 {
+		// A different mobile each time, so the per-mobile backoff never applies.
+		c := portalLoginCall(a.code, fmt.Sprintf("97%08d", i), "wrong")
+		c.remote = "203.0.113.7"
+		last = e.do(t, c)
+	}
+	wantCode(t, "61st", last, http.StatusTooManyRequests, "rate_limited")
+	c := portalLoginCall(a.code, ownerMobile, ownerPass)
+	c.remote = "198.51.100.10"
+	wantCode(t, "another address", e.do(t, c), http.StatusOK, "")
+	e.clock.Advance(10 * time.Minute)
+	c.remote = "203.0.113.7"
+	wantCode(t, "next window", e.do(t, c), http.StatusOK, "")
+}
+
+// A Previa support-view session (platform_user_id only) is refused until support view is built, and isn't renewed.
+func TestSupportViewSessionRefused(t *testing.T) {
+	e, a, b := newAuthEnv(t)
+	sid, _ := e.portalSession(t, a)
+	other, _ := e.portalSession(t, b)
+	var puID int64
+	e.q(t, `INSERT INTO platform_users (name, email, role) VALUES ('Support', $1, 'support') RETURNING id`, &puID,
+		"support-"+strings.ToLower(rand.Text()[:8])+"@previa.test")
+	e.exec(t, `UPDATE sessions SET user_id = NULL, platform_user_id = $1, read_only = true,
+		last_seen_at = now() - interval '1 hour' WHERE tenant_id = $2 AND revoked_at IS NULL`, puID, a.id)
+	wantCode(t, "support view", e.do(t, call{method: http.MethodGet, path: auth.PathMe, cookies: []*http.Cookie{sid}}),
+		http.StatusUnauthorized, "unauthenticated")
+	var stale bool
+	e.q(t, `SELECT bool_and(last_seen_at < now() - interval '30 minutes') FROM sessions WHERE platform_user_id = $1`,
+		&stale, puID)
+	if !stale {
+		t.Fatal("a refused support-view session was renewed")
+	}
+	wantCode(t, "other school's staff", e.do(t, call{method: http.MethodGet, path: auth.PathMe,
+		cookies: []*http.Cookie{other}}), http.StatusOK, "")
 }
 
 func TestSessionTokenTampering(t *testing.T) {
@@ -592,7 +701,7 @@ func TestBackoffParallelGuesses(t *testing.T) {
 	}
 	wantCode(t, "right PIN during backoff", e.do(t, pinCall(a.code, driverMobile, driverPIN, installOne)),
 		http.StatusUnauthorized, "bad_credentials")
-	e.exec(t, `UPDATE users SET locked_until = now() - interval '1 second' WHERE id = $1`, a.driverID)
+	e.clock.Advance(30 * time.Second)
 	wantCode(t, "right PIN after backoff", e.do(t, pinCall(a.code, driverMobile, driverPIN, installOne)), http.StatusOK, "")
 }
 

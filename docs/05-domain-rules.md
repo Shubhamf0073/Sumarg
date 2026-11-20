@@ -89,8 +89,14 @@ settled code-SMS rows are deleted by the worker after 24 h (the sealed code is w
   matches. School codes are not secret (printed on invites and QR codes), so an unknown code may answer faster.
 - Push tokens: at most 20 registrations per session per hour (429), so one session can't fill `push_tokens`.
 - Driver PIN: 6 digits, exponential backoff after 5 failures, reset by an admin.
-- Backoff (passwords and PINs): from the 5th failure the next try waits 30 s, doubling to 15 min; during backoff even
-  the right secret gets the same 401. A cancelled school → 423 after the secret verifies; a suspended school signs in
+- Backoff (passwords and PINs) is per school code + mobile + client address (IPv6: its /64), so an attacker's
+  failures slow down only their own address: from the 5th failure the next try waits 30 s, doubling to 15 min, and
+  one address gets at most 10 failures a day per mobile; during backoff even the right secret gets the same 401.
+  Unknown mobiles back off the same way (no oracle). Over every address together a user gets at most 50 failures
+  per 24 h (counted in the database, survives restarts; successes don't count, but don't reset it), after which every try gets the
+  same 401 until the window ends and a warning is logged. A 6-digit PIN is then one chance in 20,000 a day, and
+  locking a user out takes 5 addresses at once. Per address, at most 60 sign-ins per 10 min (429). There is no
+  per-school sign-in limit: it would let one attacker close a whole school's login. A cancelled school → 423 after the secret verifies; a suspended school signs in
   read-only. Login revokes any session the client presents for the same school (no fixation); a token for another
   school is left to expire — it is under that school's RLS and can't be fixed onto this one.
 - Support view: Previa support gets a 30-min read-only session (`InTenantReadOnly`), shown in the school's audit.

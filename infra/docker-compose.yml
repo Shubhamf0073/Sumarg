@@ -136,3 +136,10 @@ services:
 networks:
   schoolfleet:
     driver: bridge
+    # Pinned so the Nginx hop has a fixed address inside the API container: host Nginx → 127.0.0.1:API_PORT arrives
+    # from this network's gateway (.1), the only peer whose X-Forwarded-For the API believes (TRUSTED_PROXIES in
+    # .env). Must not overlap another compose project's network on the shared VPS (check `docker network inspect`).
+    ipam:
+      config:
+        - subnet: 172.30.231.0/24
+          gateway: 172.30.231.1

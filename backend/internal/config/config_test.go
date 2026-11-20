@@ -27,7 +27,7 @@ func production() map[string]string {
 		"SMS_PROVIDER": "msg91", "SMS_API_KEY": smsKey, "SMS_SENDER_ID": "PREVIA", "SMS_DLT_PE_ID": "1101",
 		"SMS_DLT_TEMPLATE_OTP":    "1107",
 		"GOOGLE_MAPS_BROWSER_KEY": "browser-key", "GOOGLE_MAPS_SERVER_KEY": mapsSrvKey,
-		"APP_DOMAIN": "sumarg.example.com",
+		"APP_DOMAIN": "sumarg.example.com", "TRUSTED_PROXIES": "172.30.231.1/32",
 	}
 }
 
@@ -88,6 +88,9 @@ func TestInvalidConfigNamesTheVariable(t *testing.T) {
 		{"missing app domain", with(production(), "APP_DOMAIN", "-"), "APP_DOMAIN is required"},
 		{"app domain with scheme", with(production(), "APP_DOMAIN", "https://sumarg.example.com"), "APP_DOMAIN must be a bare host"},
 		{"app domain with port", with(production(), "APP_DOMAIN", "sumarg.example.com:443"), "APP_DOMAIN must be a bare host"},
+		{"no trusted proxies in production", with(production(), "TRUSTED_PROXIES", "-"), "TRUSTED_PROXIES is required"},
+		{"trusted proxy not a prefix", with(production(), "TRUSTED_PROXIES", "nginx"), "TRUSTED_PROXIES must be a comma-separated"},
+		{"trusted proxy too wide", with(production(), "TRUSTED_PROXIES", "0.0.0.0/0"), "TRUSTED_PROXIES prefixes must be narrow"},
 		{"bad mqtt port", with(production(), "MQTT_PORT", "70000"), "MQTT_PORT"},
 		{"plain mqtt in production", with(production(), "MQTT_PLAIN_PORT", "1883"), "MQTT_PLAIN_PORT is a local-development port"},
 		{"plain port equals tls port", with(local(), "MQTT_PLAIN_PORT", "8883"), "MQTT_PLAIN_PORT must differ"},

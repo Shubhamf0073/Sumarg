@@ -267,11 +267,13 @@ CREATE TABLE users (                             -- school staff and crew (not p
     password_hash          text,                         -- web portal roles
     pin_hash               text,                         -- driver/attendant app: 6-digit PIN + device binding
     must_change_secret     boolean NOT NULL DEFAULT true,
-    failed_logins          smallint NOT NULL DEFAULT 0,
-    locked_until           timestamptz,
+    failed_logins          smallint NOT NULL DEFAULT 0,  -- in a row, since the last success (support view)
+    locked_until           timestamptz,                  -- unused since M1.2a (backoff is per address, in process); drop later
     is_active              boolean NOT NULL DEFAULT true,
     version                integer NOT NULL DEFAULT 1,
     created_at             timestamptz NOT NULL DEFAULT now(),
+    fail_window_start      timestamptz,                  -- daily cap over every address (docs/05 §10): 24 h window start
+    fail_window_count      smallint NOT NULL DEFAULT 0,  -- failures in that window; at 50 every try gets the same 401
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, mobile),
     FOREIGN KEY (tenant_id, campus_id) REFERENCES campuses (tenant_id, id),

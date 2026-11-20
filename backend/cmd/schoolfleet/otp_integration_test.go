@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"strings"
 	"sync"
@@ -286,7 +287,9 @@ func TestOTPPerSchoolLimit(t *testing.T) {
 			m := fmt.Sprintf("97%08d", next)
 			next++
 			e.guardian(t, s, m, true)
-			wantCode(t, "request", e.do(t, otpCall(s.code, m)), http.StatusAccepted, "")
+			c := otpCall(s.code, m)
+			c.remote = fmt.Sprintf("203.0.113.%d", next%250) // parents on many networks: only the school limit applies
+			wantCode(t, "request", e.do(t, c), http.StatusAccepted, "")
 		}
 	}
 
@@ -376,7 +379,7 @@ func TestOTPPerIPLimit(t *testing.T) {
 	t.Cleanup(app.Close)
 	r := chi.NewRouter()
 	fake := clock.NewFake(time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC))
-	mountAPI(r, auth.Deps{DB: db.Bind(app), OTP: e.keys, Limits: auth.NewLimits(fake)})
+	mountAPI(r, auth.Deps{DB: db.Bind(app), OTP: e.keys, Limits: auth.NewLimits(fake), TrustedProxies: testProxy})
 	ip := func(addr string) map[string]string { return map[string]string{"X-Forwarded-For": addr} }
 	body := map[string]string{"school_code": a.code, "mobile": "9855555555"}
 	for i := range 30 {
@@ -456,7 +459,7 @@ func TestPushTokenLimit(t *testing.T) {
 	t.Cleanup(app.Close)
 	r := chi.NewRouter()
 	fake := clock.NewFake(time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC))
-	mountAPI(r, auth.Deps{DB: db.Bind(app), OTP: e.keys, Limits: auth.NewLimits(fake)})
+	mountAPI(r, auth.Deps{DB: db.Bind(app), OTP: e.keys, Limits: auth.NewLimits(fake), TrustedProxies: testProxy})
 	tokA := e.parentToken(t, a, e.guardian(t, a, parentMobile, true), installOne)
 	tokB := e.parentToken(t, b, e.guardian(t, b, parentMobile, true), installOne)
 	push := func(tok string, i int) int {
@@ -611,3 +614,6 @@ func TestOTPPurge(t *testing.T) {
 		}
 	}
 }
+
+// testProxy stands in for the Nginx hop: httptest's peer address, so X-Forwarded-For names the client.
+var testProxy = []netip.Prefix{netip.MustParsePrefix("192.0.2.1/32")}

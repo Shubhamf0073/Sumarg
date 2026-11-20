@@ -42,13 +42,19 @@ func TxFrom(ctx context.Context) (pgx.Tx, bool) {
 type Resolver func(r *http.Request) (Resolved, error)
 
 // Resolved is what a Resolver found. Ctx, if set, replaces the request's context for the handler: it must derive
-// from r.Context() and is where the resolver leaves what it learned (e.g. the session's principal), so the handler
+// from r.Context() (RequestTx refuses one that doesn't) and is where the resolver leaves what it learned (e.g. the session's principal), so the handler
 // needn't look the session up a second time.
 type Resolved struct {
 	TenantID int64
 	ReadOnly bool
 	Ctx      context.Context
 }
+
+// resolveMarkKey holds a per-request marker that RequestTx looks for in Resolved.Ctx; a Ctx without it is a 500
+// and no transaction is opened.
+type resolveMarkKey struct{}
+
+var errCtxNotDerived = errors.New("db: Resolved.Ctx does not derive from the request's context")
 
 // RequestTx runs each request in one tenant transaction on pool (docs/02 §5).
 //
@@ -66,12 +72,20 @@ type Resolved struct {
 func RequestTx(pool *pgxpool.Pool, resolve Resolver) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// The marker lets us check that a resolver's Ctx derives from this request's context (so it keeps its
+			// cancellation, deadline and request id) rather than from context.Background or another request.
+			mark := new(byte)
+			r = r.WithContext(context.WithValue(r.Context(), resolveMarkKey{}, mark))
 			res, err := resolve(r)
 			if err != nil {
 				httpx.WriteError(w, r, err)
 				return
 			}
 			if res.Ctx != nil {
+				if m, _ := res.Ctx.Value(resolveMarkKey{}).(*byte); m != mark {
+					httpx.WriteError(w, r, errCtxNotDerived)
+					return
+				}
 				r = r.WithContext(res.Ctx)
 			}
 			tenantID, readOnly := res.TenantID, res.ReadOnly
