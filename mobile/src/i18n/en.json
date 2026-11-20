@@ -1,0 +1,14 @@
+{
+  "app.name": "Sumarg",
+  "common.comingSoon": "Coming soon.",
+  "auth.title": "Sign in",
+  "auth.subtitle": "Sign in arrives with the login tasks.",
+  "tab.home": "Home",
+  "tab.children": "My Children",
+  "tab.tracking": "Tracking",
+  "tab.notifications": "Notifications",
+  "tab.more": "More",
+  "tab.trip": "My Trip",
+  "tab.incidents": "Incidents",
+  "tab.messages": "Messages"
+}

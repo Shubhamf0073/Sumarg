@@ -17,7 +17,7 @@ and its host tests, Expo app config.
 - [x] M0.2 Sumarg config struct (`PLATFORM_DATABASE_URL`, `SECRETS_KEY`, MQTT, FCM, SMS, Maps); `Setup` hook in `platform/app` (same change as Cargo M0.2 — copy it if Cargo did it first) **[review]**
 - [x] M0.3 Pools + request tx middleware + readiness (copy from Cargo M0.3) **[review]** — built from platform/db (Cargo repo not on disk); `db.RequestTx` buffers the response and commits before sending
 - [x] M0.4 huma + error mapping + `schoolfleet openapi` + `make gen-api` for portal and app — huma v2.40.0; one flat error body with `fields`; spec has no paths until M1 (`/api/healthz` stays plain text for Nginx); biome/tsc stay red until M0.5
-- [ ] M0.5 Portal skeleton (demo CSS, router, `/admin` lazy) and Expo app skeleton (expo-router, auth stack, two tab sets, API client) — `npx expo install --fix`
+- [x] M0.5 Portal skeleton (demo CSS, router, `/admin` lazy) and Expo app skeleton (expo-router, auth stack, two tab sets, API client) — `npx expo install --fix` — portal: tsc/biome/build green, `/admin` lazy chunk; app: tsc/biome/jest green, expo install --fix only bumped react-native 0.81.5; no sign-in or real screens yet (M1.2+)
 
 ### M1 — Tenancy, auth, onboarding (2.5 d)
 - [ ] M1.1 Isolation suite: catalog check (every tenant table forced RLS, no DELETE grant), parent-scope walker (every `/parent/*` route with another guardian's ids → 404) **[opus] [review]**
