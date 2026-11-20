@@ -1,0 +1,311 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://previa.local/protocol/telemetry.v1.json",
+  "title": "Telemetry batch v1 (device -> cloud)",
+  "type": "object",
+  "required": [
+    "v",
+    "did",
+    "fw",
+    "recs"
+  ],
+  "properties": {
+    "v": {
+      "const": 1
+    },
+    "did": {
+      "type": "string",
+      "pattern": "^PV-[0-9A-F]{6,12}$"
+    },
+    "fw": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.]+)?$"
+    },
+    "bt": {
+      "type": "integer",
+      "description": "batch send time, unix s"
+    },
+    "recs": {
+      "type": "array",
+      "maxItems": 120,
+      "items": {
+        "$ref": "#/$defs/record"
+      }
+    },
+    "evs": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "$ref": "#/$defs/event"
+      }
+    }
+  },
+  "$defs": {
+    "seq": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ts": {
+      "type": "integer",
+      "minimum": 1577836800,
+      "description": "unix seconds UTC"
+    },
+    "record": {
+      "type": "object",
+      "required": [
+        "s",
+        "t"
+      ],
+      "properties": {
+        "s": {
+          "$ref": "#/$defs/seq"
+        },
+        "t": {
+          "$ref": "#/$defs/ts"
+        },
+        "tq": {
+          "enum": [
+            0,
+            1
+          ],
+          "description": "1 = time not from GPS"
+        },
+        "la": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        },
+        "lo": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "sp": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 250
+        },
+        "hd": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 359
+        },
+        "al": {
+          "type": "number"
+        },
+        "sa": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50
+        },
+        "hp": {
+          "type": "number",
+          "minimum": 0
+        },
+        "ig": {
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "mv": {
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "w": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "weight raw mV"
+        },
+        "fu": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "fuel raw mV"
+        },
+        "vi": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000
+        },
+        "vb": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20000
+        },
+        "dm": {
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "tl": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 180
+        },
+        "cq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 99
+        }
+      },
+      "dependentRequired": {
+        "la": [
+          "lo"
+        ],
+        "lo": [
+          "la"
+        ]
+      }
+    },
+    "event": {
+      "type": "object",
+      "required": [
+        "s",
+        "t",
+        "k"
+      ],
+      "properties": {
+        "s": {
+          "$ref": "#/$defs/seq"
+        },
+        "t": {
+          "$ref": "#/$defs/ts"
+        },
+        "k": {
+          "enum": [
+            "DUMP_START",
+            "DUMP",
+            "LOAD_SETTLED",
+            "HARSH_ACCEL",
+            "HARSH_BRAKE",
+            "HARSH_CORNER",
+            "TILT",
+            "IGN_ON",
+            "IGN_OFF",
+            "POWER_CUT",
+            "POWER_RESTORE",
+            "TAMPER",
+            "OVERSPEED_LOCAL",
+            "GPS_LOST",
+            "GPS_FIX",
+            "BOOT",
+            "SD_ERROR"
+          ]
+        },
+        "la": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        },
+        "lo": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "d": {
+          "type": "object"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "k": {
+                "const": "DUMP"
+              }
+            },
+            "required": [
+              "k"
+            ]
+          },
+          "then": {
+            "properties": {
+              "d": {
+                "type": "object",
+                "properties": {
+                  "dur_s": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "dump window length t − t0, s (41.0 is a valid integer)"
+                  },
+                  "tilt_max": {
+                    "type": "number",
+                    "description": "peak body tilt during the window, deg"
+                  },
+                  "w_before": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 5000,
+                    "description": "raw weight sensor reading before the dump (same units and range as rec.w)"
+                  },
+                  "w_after": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 5000,
+                    "description": "raw weight sensor reading after the dump (same units and range as rec.w)"
+                  },
+                  "src": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "which inputs detected the dump, e.g. DM+IMU"
+                  },
+                  "t0": {
+                    "$ref": "#/$defs/ts",
+                    "description": "dump window start, unix s"
+                  },
+                  "fx": {
+                    "type": "array",
+                    "maxItems": 600,
+                    "description": "dump-window fixes [dt_ms after t0, la, lo, hdop, sats, ...]; extra trailing columns are allowed within v1",
+                    "items": {
+                      "type": "array",
+                      "minItems": 5,
+                      "prefixItems": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 600000
+                        },
+                        {
+                          "type": "number",
+                          "minimum": -90,
+                          "maximum": 90
+                        },
+                        {
+                          "type": "number",
+                          "minimum": -180,
+                          "maximum": 180
+                        },
+                        {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      ],
+                      "items": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                },
+                "dependentRequired": {
+                  "fx": [
+                    "t0"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

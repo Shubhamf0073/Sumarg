@@ -1,0 +1,3 @@
+campus_code,reg_no,label,make_model,seats,ownership,contractor_name,fitness_expiry,insurance_expiry,permit_expiry,puc_expiry,vltd_vendor
+MAIN,GJ01AB1001,Bus 1,Demo 32-seater,32,school,,31-03-2027,31-03-2027,31-03-2027,30-04-2027,Demo VLTD
+MAIN,GJ01AB1002,Bus 2,Demo 26-seater,26,contractor,Demo Travels,31-03-2027,31-03-2027,31-03-2027,30-04-2027,Demo VLTD

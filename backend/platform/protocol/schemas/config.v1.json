@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://previa.local/protocol/config.v1.json",
+  "title": "Device config v1 (cloud -> device, retained)",
+  "type": "object",
+  "required": [
+    "v",
+    "cfgVer",
+    "tk",
+    "report"
+  ],
+  "properties": {
+    "v": {
+      "const": 1
+    },
+    "cfgVer": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "tk": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]{2,32}$"
+    },
+    "report": {
+      "type": "object",
+      "required": [
+        "movingS",
+        "idleS",
+        "offS"
+      ],
+      "properties": {
+        "movingS": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600
+        },
+        "movingM": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000
+        },
+        "headingDeg": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 180
+        },
+        "idleS": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 3600
+        },
+        "offS": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400
+        },
+        "batch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 120
+        },
+        "maxBatchS": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        }
+      }
+    },
+    "motion": {
+      "type": "object",
+      "properties": {
+        "moveKmh": {
+          "type": "number"
+        },
+        "stopKmh": {
+          "type": "number"
+        }
+      }
+    },
+    "inputs": {
+      "type": "object"
+    },
+    "imu": {
+      "type": "object"
+    },
+    "weight": {
+      "type": "object"
+    },
+    "speed": {
+      "type": "object",
+      "properties": {
+        "buzzerKmh": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 200
+        }
+      }
+    },
+    "buzzer": {
+      "type": "object"
+    },
+    "fw": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "enum": [
+            "dev",
+            "beta",
+            "stable"
+          ]
+        }
+      }
+    },
+    "dump": {
+      "type": "object",
+      "properties": {
+        "fixHz": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "description": "GPS fixes per second recorded during a dump window (default 2)",
+          "default": 2
+        }
+      }
+    },
+    "broker": {
+      "type": "object",
+      "required": [
+        "host",
+        "port"
+      ],
+      "description": "MQTT broker for the device's next connection; absent = the factory-provisioned broker (docs/06 \u00a76). TLS is always used.",
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[A-Za-z0-9.-]+$"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    }
+  }
+}

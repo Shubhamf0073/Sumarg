@@ -1,0 +1,96 @@
+# golangci-lint v2. `make lint` runs it; CI runs it; the Stop hook runs it on changed packages only.
+# Architecture rules live here (depguard) so they fail at lint time, not in review (docs/02 A4, CLAUDE.md invariants).
+version: "2"
+
+run:
+  timeout: 3m
+  build-tags: [integration]
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose
+    - depguard
+    - errorlint
+    - forbidigo
+    - gosec
+    - noctx
+    - rowserrcheck
+    - sqlclosecheck
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprintf # usage/errors to stderr in cmd and platform/app
+        - fmt.Fprintln
+        - (io.ReadCloser).Close # response bodies: nothing useful to do with the error
+    depguard:
+      rules:
+        only-platform-opens-pools:
+          files: ["$all", "!**/platform/db/**", "!**/cmd/migrate/**"] # goose needs database/sql
+          deny:
+            - pkg: github.com/jackc/pgx/v5/pgxpool
+              desc: "only platform/db opens pools: use db.InTenant (tenant routes) or platformdb.InPlatform (admin, worker)"
+            - pkg: database/sql
+              desc: "pgx only, through platform/db"
+        tenant-code-never-bypasses-rls:
+          files: ["**/internal/tenant/**", "**/internal/shared/**"]
+          deny:
+            - pkg: github.com/Shubhamf0073/previa-school-fleet/backend/platform/db/platformdb
+              desc: "tenant code runs as sf_app under RLS (CLAUDE.md invariant 3)"
+            - pkg: github.com/Shubhamf0073/previa-school-fleet/backend/internal/store/platformq
+              desc: "platform queries bypass RLS; tenant code uses internal/store/tenantq"
+            - pkg: github.com/Shubhamf0073/previa-school-fleet/backend/internal/admin
+              desc: "tenant code must not import admin code"
+            - pkg: github.com/Shubhamf0073/previa-school-fleet/backend/internal/worker
+              desc: "tenant code enqueues outbox rows; it never calls the worker"
+            - pkg: github.com/Shubhamf0073/previa-school-fleet/backend/internal/ingest
+              desc: "ingest runs as sf_platform; tenant code reads what it stored"
+        no-unapproved-modules:
+          # Mirrors .claude/approved-deps.txt. Adding a module = ADR table in docs/02 + this list + approved-deps.
+          list-mode: lax
+          files: ["$all"]
+          deny:
+            - pkg: github.com/lib/pq
+              desc: "use pgx"
+            - pkg: gorm.io
+              desc: "SQL lives in queries/*.sql (sqlc)"
+            - pkg: github.com/pkg/errors
+              desc: "use fmt.Errorf with %w"
+            - pkg: math/rand
+              desc: "crypto/rand for tokens; math/rand/v2 only for jitter"
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^os\.(Getenv|LookupEnv|Environ)$
+          msg: "configuration only through platform/config (validated at start-up)"
+        - pattern: ^time\.Now$
+          msg: "use the injected clock.Clock so tests control time"
+        - pattern: ^fmt\.Print(f|ln)?$
+          msg: "log with slog (httpx.Logger(ctx)); stdout is the JSON log stream"
+        - pattern: ^http\.(Get|Post|Head|PostForm)$
+          msg: "outbound HTTP only from the worker or the route/toll client, with a context and timeout"
+    gosec:
+      excludes:
+        - G115 # integer conversions: money uses math/bits with explicit bounds checks
+  exclusions:
+    generated: strict
+    rules:
+      - path: _test\.go
+        linters: [gosec, forbidigo, noctx, bodyclose, errcheck, errorlint]
+      - path: platform/clock/
+        linters: [forbidigo] # the one place time.Now is allowed
+      - path: platform/config/
+        text: "os\\.(Environ|LookupEnv|Getenv)"
+        linters: [forbidigo]
+      - path: cmd/
+        text: "fmt\\.Print"
+        linters: [forbidigo] # CLI usage/help text
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/Shubhamf0073/previa-school-fleet

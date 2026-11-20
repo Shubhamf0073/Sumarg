@@ -1,0 +1,10 @@
+# Build context = backend/. Keep secrets and local state out of the image.
+.env
+.env.*
+*.pem
+*.key
+secrets/
+**/*_test.go
+**/testdata/
+coverage.out
+.golangci.yml

@@ -1,0 +1,12 @@
+{ "v": 1, "cfgVer": 13, "tk": "acme",
+  "report": { "movingS": 10, "movingM": 100, "headingDeg": 15, "idleS": 300, "offS": 1800, "batch": 6, "maxBatchS": 60 },
+  "motion": { "moveKmh": 5, "stopKmh": 3 },
+  "inputs": { "dump": { "enabled": true, "activeHigh": false, "debounceMs": 800 },
+              "ign": { "enabled": true, "source": "opto", "vThreshMv": 26400 },
+              "weight": { "enabled": true, "type": "pressure", "sampleHz": 20 },
+              "fuel": { "enabled": true, "type": "float_ohm", "sampleHz": 1 } },
+  "imu": { "harshAccelG": 0.35, "harshBrakeG": 0.45, "harshCornerG": 0.40, "tiltWarnDeg": 25, "dumpTiltDeg": 20, "axisMap": "+X+Y+Z" },
+  "weight": { "settleS": 20, "maxStd": 15, "overloadRaw": 3100 },
+  "speed": { "buzzerKmh": 40 },
+  "buzzer": { "overspeed": true, "overload": true, "tilt": true },
+  "fw": { "channel": "stable" } }

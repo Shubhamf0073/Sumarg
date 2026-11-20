@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://previa.local/protocol/ack.v1.json",
+  "title": "Ack v1 (device -> cloud)",
+  "type": "object",
+  "required": ["v", "id", "ok", "t"],
+  "properties": {
+    "v": { "const": 1 },
+    "id": { "type": "string" },
+    "ok": { "type": "boolean" },
+    "t": { "type": "integer" },
+    "err": { "type": "string" },
+    "r": { "type": "object" }
+  }
+}

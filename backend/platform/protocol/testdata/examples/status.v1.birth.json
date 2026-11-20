@@ -1,0 +1,3 @@
+{ "v": 1, "online": true, "did": "PV-A1B2C3", "fw": "0.3.1", "hw": "r1", "imei": "869951012345678", "iccid": "89914509001234567890",
+  "cfgVer": 12, "boot": 1759460000, "reset": "POWERON", "csq": 22, "op": "40445", "rat": "LTE",
+  "sd": { "ok": true, "freeMb": 7300, "backlog": 0 }, "gps": { "fix": 3, "sats": 10 }, "vb": 8120, "vi": 25400, "dip": "00" }

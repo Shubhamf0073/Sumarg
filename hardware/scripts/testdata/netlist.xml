@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Hand-made fixture in the KiCad XML netlist shape (kicad-cli sch export netlist, format kicadxml) -->
+<export version="E">
+  <design>
+    <source>sb-c1.kicad_sch</source>
+    <tool>Eeschema 10.0</tool>
+  </design>
+  <components>
+    <comp ref="J5">
+      <value>Waveshare_ESP32S3_SIM7670G</value>
+      <footprint>sb:Waveshare_ESP32S3_SIM7670G_Header</footprint>
+      <fields>
+        <field name="MPN">ESP32-S3-SIM7670G-4G-EN</field>
+        <field name="Role">MCU</field>
+      </fields>
+    </comp>
+    <comp ref="U3">
+      <value>TLP291</value>
+      <footprint>Package_SO:SOIC-4_4.55x2.6mm_P1.27mm</footprint>
+      <fields>
+        <field name="MPN">TLP291(GB-TP,SE</field>
+      </fields>
+    </comp>
+    <comp ref="R10">
+      <value>10k</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields/>
+    </comp>
+    <comp ref="TP1">
+      <value>TestPoint</value>
+      <footprint>TestPoint:TestPoint_Pad_D1.0mm</footprint>
+      <fields/>
+    </comp>
+  </components>
+  <nets>
+    <net code="1" name="GND" class="Default">
+      <node ref="J5" pin="1" pinfunction="GND" pintype="power_in"/>
+      <node ref="U3" pin="2" pinfunction="K" pintype="passive"/>
+    </net>
+    <net code="2" name="/SOS_DRIVER" class="Default">
+      <node ref="J5" pin="7" pinfunction="GPIO4" pintype="bidirectional"/>
+      <node ref="U3" pin="4" pinfunction="C" pintype="passive"/>
+      <node ref="R10" pin="1" pintype="passive"/>
+    </net>
+    <net code="3" name="/VIN_SENSE" class="Default">
+      <node ref="J5" pin="5" pinfunction="GPIO2" pintype="bidirectional"/>
+      <node ref="TP1" pin="1" pintype="passive"/>
+    </net>
+    <net code="4" name="/BATT_NTC" class="Default">
+      <node ref="J5" pin="12" pinfunction="GPIO18" pintype="bidirectional"/>
+    </net>
+    <net code="5" name="/TAMPER" class="Default">
+      <node ref="J5" pin="20" pinfunction="GPIO40" pintype="bidirectional"/>
+      <node ref="R10" pin="2" pintype="passive"/>
+    </net>
+    <net code="6" name="/KEEP_ALIVE" class="Default">
+      <node ref="J5" pin="22" pinfunction="IO35" pintype="bidirectional"/>
+    </net>
+  </nets>
+</export>

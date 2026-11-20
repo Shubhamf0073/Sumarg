@@ -1,0 +1,12 @@
+# Production hardening (docs/14 §9). Burning these eFuses is IRREVERSIBLE: do it only at the provisioning station
+# with the release signing key, never from a developer laptop. Secure Boot v2 (RSA-3072 or ECDSA) + flash encryption
+# in RELEASE mode + encrypted NVS. JTAG and ROM download mode are disabled.
+CONFIG_SECURE_BOOT=y
+CONFIG_SECURE_BOOT_V2_ENABLED=y
+CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=n
+CONFIG_SECURE_FLASH_ENC_ENABLED=y
+CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y
+CONFIG_NVS_ENCRYPTION=y
+CONFIG_SECURE_UART_ROM_DL_MODE=y
+CONFIG_SECURE_DISABLE_ROM_DL_MODE=n
+CONFIG_ESP_SYSTEM_MEMPROT_FEATURE=y

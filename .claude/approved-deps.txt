@@ -1,0 +1,68 @@
+# Approved dependencies — edited by the HUMAN only (a hook blocks Claude from changing this file).
+# Format: <ecosystem> <name>   # why
+#   ecosystems: go | npm | tool (Go CLI tools installed with `go install`, not linked into the binary)
+#   Go entries approve sub-packages too (prefix match). npm scopes may use a wildcard (@scope/*).
+# Mirrors the ADR table in docs/02 §2. Adding one: /add-dependency (verify name, owner, repo, age, downloads,
+# recent ownership changes, install scripts), then update docs/02 in the same commit.
+# Enforced by: .claude/hooks/guard_deps.py (go get / npm install / npx), .claude/hooks/stop_check.py (go.mod),
+# depguard in backend/.golangci.yml (known-bad imports).
+
+# ---------- Go (backend) ----------
+go github.com/go-chi/chi/v5                  # router (platform/httpx)
+go github.com/danielgtaylor/huma/v2          # OpenAPI 3.1 + validation on chi (A3)
+go github.com/jackc/pgx/v5                   # Postgres driver/pool (platform/db)
+go github.com/pressly/goose/v3               # SQL migrations (cmd/migrate)
+go github.com/google/uuid                    # UUIDv7 request ids, tokens (platform/ids)
+go github.com/caarlos0/env/v11               # env parsing (platform/config)
+go golang.org/x/sync                         # errgroup (platform/app)
+go golang.org/x/crypto                       # argon2id (tenant passwords)
+go github.com/go-webauthn/webauthn           # passkeys for Previa admins (A24)
+go github.com/mochi-mqtt/server/v2            # embedded MQTT broker in ingest (A8)
+go github.com/santhosh-tekuri/jsonschema/v6   # protocol schema validation (from Previa Fleet)
+go golang.org/x/oauth2                        # FCM HTTP v1 service-account token (A10)
+
+# ---------- Go tools (not in the binary) ----------
+tool github.com/sqlc-dev/sqlc                # queries/*.sql → Go
+tool github.com/golangci/golangci-lint/v2    # lint
+tool golang.org/x/vuln                       # govulncheck
+tool golang.org/x/tools                      # goimports
+
+# ---------- npm (portal: frontend/) ----------
+npm react
+npm react-dom
+npm react-router
+npm @tanstack/react-query
+npm openapi-fetch
+npm openapi-typescript
+npm lucide-react
+npm @googlemaps/js-api-loader
+npm @types/google.maps
+npm @types/react
+npm @types/react-dom
+npm typescript
+npm vite
+npm @vitejs/plugin-react
+npm @biomejs/biome
+npm @playwright/test
+
+# ---------- npm (app: mobile/) — versions via `npx expo install` ----------
+npm expo
+npm expo-router
+npm expo-notifications
+npm expo-secure-store
+npm expo-localization
+npm expo-location
+npm expo-camera
+npm react-native
+npm react-native-maps
+npm jest
+npm jest-expo
+npm eas-cli
+
+# ---------- firmware (PlatformIO registry; pinned in firmware/platformio.ini) ----------
+# Not enforced by guard_deps (pio installs from platformio.ini); `pio pkg install` is in the settings ask list.
+pio bblanchon/ArduinoJson
+pio vshymanskyy/TinyGSM
+pio miguelbalboa/MFRC522
+pio olikraus/U8g2
+pio espressif/esp32-camera

@@ -1,0 +1,33 @@
+# secrets — never commit
+.env
+.env.*
+!.env.example
+db.env
+!infra/db.env.example
+*.pem
+*.key
+secrets/
+
+# go
+.bin/
+coverage.out
+*.test
+backend/schoolfleet
+backend/migrate
+
+# node
+node_modules/
+dist/
+playwright-report/
+test-results/
+
+# local data
+.data/
+*.dump
+*.sql.gz
+
+# editors / os
+.DS_Store
+.idea/
+.vscode/
+.claude/settings.local.json

@@ -1,0 +1,13 @@
+campus_code,admission_no,student_name,class,section,to_route_code,to_stop_name,from_route_code,from_stop_name,guardian1_name,guardian1_mobile,guardian1_relation,guardian1_language,guardian2_name,guardian2_mobile,guardian2_relation,guardian2_language,special_needs_note
+MAIN,DPS1001,Aarav Shah,Grade 1,A,R-01,Ghuma Gam,R-01,Ghuma Gam,Demo Mother of Aarav,9000000100,mother,en,Demo Father of Aarav,9000000200,father,en,
+MAIN,DPS1002,Diya Patel,Grade 2,B,R-02,Shela Circle,R-02,Shela Circle,Demo Mother of Diya,9000000101,mother,gu,,,,,
+MAIN,DPS1003,Vihaan Mehta,Grade 3,A,R-01,Bopal Gam,R-01,Bopal Gam,Demo Mother of Vihaan,9000000102,mother,hi,,,,,
+MAIN,DPS1004,Anaya Desai,Grade 4,B,R-02,Safal Parisar,R-02,Safal Parisar,Demo Mother of Anaya,9000000103,mother,en,Demo Father of Anaya,9000000203,father,en,
+MAIN,DPS1005,Kabir Joshi,Grade 5,A,R-01,Bopal Char Rasta,R-01,Bopal Char Rasta,Demo Mother of Kabir,9000000104,mother,gu,,,,,
+MAIN,DPS1006,Myra Trivedi,Grade 6,B,R-02,Sobo Centre,R-02,Sobo Centre,Demo Mother of Myra,9000000105,mother,hi,,,,,needs help on the step
+MAIN,DPS1007,Reyansh Parikh,Grade 7,A,R-01,Ambli Road Corner,R-01,Ambli Road Corner,Demo Mother of Reyansh,9000000106,mother,en,Demo Father of Reyansh,9000000206,father,en,
+MAIN,DPS1008,Saanvi Bhatt,Grade 8,B,R-02,Shivalik Society,R-02,Shivalik Society,Demo Mother of Saanvi,9000000107,mother,gu,,,,,
+MAIN,DPS1009,Ishaan Vyas,Grade 1,A,R-01,Ghuma Gam,R-01,Ghuma Gam,Demo Mother of Ishaan,9000000108,mother,hi,,,,,
+MAIN,DPS1010,Kiara Pandya,Grade 2,B,R-02,Shela Circle,R-02,Shela Circle,Demo Mother of Kiara,9000000109,mother,en,Demo Father of Kiara,9000000209,father,en,
+MAIN,DPS1011,Arjun Shah,Grade 3,A,R-01,Bopal Gam,R-01,Bopal Gam,Demo Mother of Aarav,9000000100,mother,gu,,,,,
+MAIN,DPS1012,Navya Rao,Grade 4,B,R-02,Safal Parisar,R-02,Safal Parisar,Demo Mother of Navya,9000000111,mother,hi,,,,,

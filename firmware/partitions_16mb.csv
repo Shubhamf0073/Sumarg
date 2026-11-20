@@ -1,0 +1,9 @@
+# Name,    Type, SubType,  Offset,   Size,     Flags
+# A/B OTA with rollback (docs/14 §8). nvs_keys is required for NVS encryption once flash encryption is on.
+nvs,       data, nvs,      0x9000,   0x6000,
+nvs_keys,  data, nvs_keys, 0xF000,   0x1000,   encrypted
+otadata,   data, ota,      0x10000,  0x2000,
+phy_init,  data, phy,      0x12000,  0x1000,
+ota_0,     app,  ota_0,    0x20000,  0x300000,
+ota_1,     app,  ota_1,    0x320000, 0x300000,
+journal,   data, spiffs,   0x620000, 0x9E0000,

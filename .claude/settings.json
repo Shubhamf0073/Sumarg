@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "model": "sonnet",
+  "env": {
+    "BASH_MAX_OUTPUT_LENGTH": "15000",
+    "GOFLAGS": "-mod=readonly"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(make dev-db)",
+      "Bash(make migrate)",
+      "Bash(make seed)",
+      "Bash(make run)",
+      "Bash(make web)",
+      "Bash(make test)",
+      "Bash(make test-integration)",
+      "Bash(make test *)",
+      "Bash(make lint)",
+      "Bash(make fmt)",
+      "Bash(make sqlc)",
+      "Bash(make gen-api)",
+      "Bash(make schema-diff)",
+      "Bash(make e2e)",
+      "Bash(make tools)",
+      "Bash(go build *)",
+      "Bash(go vet *)",
+      "Bash(go test *)",
+      "Bash(go list *)",
+      "Bash(go doc *)",
+      "Bash(go mod tidy)",
+      "Bash(go mod why *)",
+      "Bash(gofmt *)",
+      "Bash(./.bin/golangci-lint *)",
+      "Bash(./.bin/sqlc *)",
+      "Bash(golangci-lint *)",
+      "Bash(sqlc *)",
+      "Bash(npm ci)",
+      "Bash(npm run *)",
+      "Bash(npx playwright test *)",
+      "Bash(docker compose -f infra/docker-compose.dev.yml *)",
+      "Bash(bash .claude/scripts/docsec.sh *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git switch *)",
+      "Bash(git worktree *)",
+      "Bash(bash -n *)",
+      "Bash(shellcheck *)",
+      "Bash(make sim *)",
+      "Bash(make sim)",
+      "Bash(make fw-test)",
+      "Bash(make app)",
+      "Bash(pio test -e native*)",
+      "Bash(pio run -e sb_proto)",
+      "Bash(pio run -e sb_c1)",
+      "Bash(pio run -e sb_r1)",
+      "Bash(pio check *)",
+      "Bash(g++ *)",
+      "Bash(npx expo install --check)",
+      "Bash(npx tsc *)",
+      "Bash(bash hardware/scripts/export.sh *)",
+      "Bash(python3 -I hardware/scripts/netlist_summary.py *)",
+      "Bash(python3 -m unittest discover -s hardware/scripts)",
+      "Bash(kicad-cli version)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(git tag *)",
+      "Bash(git rebase *)",
+      "Bash(go get *)",
+      "Bash(go install *)",
+      "Bash(npm install *)",
+      "Bash(npm uninstall *)",
+      "Bash(docker compose -f infra/docker-compose.yml *)",
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "Bash(rsync *)",
+      "Edit(./infra/**)",
+      "Write(./infra/**)",
+      "Edit(./.github/**)",
+      "Write(./.github/**)",
+      "Edit(./docs/02-architecture.md)",
+      "Bash(pio pkg install *)",
+      "Bash(npx expo install *)",
+      "Bash(eas *)",
+      "Bash(npx eas *)",
+      "Edit(./firmware/sdkconfig.production)",
+      "Edit(./firmware/partitions_16mb.csv)",
+      "Edit(./backend/platform/protocol/schemas/**)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./**/.env)",
+      "Read(./**/.env.local)",
+      "Read(./**/.env.production)",
+      "Read(./**/db.env)",
+      "Read(./secrets/**)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean -fd *)",
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~*)",
+      "Bash(docker system prune *)",
+      "Bash(docker volume rm *)",
+      "Bash(dropdb *)",
+      "Bash(espefuse* burn*)",
+      "Bash(espefuse.py burn*)",
+      "Read(./**/fcm-service-account*.json)",
+      "Read(./**/google-services.json)",
+      "Read(./**/GoogleService-Info.plist)",
+      "Read(./.claude/local/**)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/session_context.py",
+            "args": [],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Read|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/guard_files.py",
+            "args": [],
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/guard_bash.py",
+            "args": [],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/guard_deps.py",
+            "args": [],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/format_file.py",
+            "args": [],
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/stop_check.py",
+            "args": [],
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

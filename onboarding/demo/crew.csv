@@ -1,0 +1,4 @@
+campus_code,kind,name,mobile,licence_no,licence_expiry,badge_no,police_verified_on,medical_checked_on
+MAIN,driver,Demo Driver One,9000000011,GJ0120260000001,31-12-2030,B-101,01-06-2026,01-06-2026
+MAIN,driver,Demo Driver Two,9000000012,GJ0120260000002,31-12-2030,B-102,01-06-2026,01-06-2026
+MAIN,attendant,Demo Attendant One,9000000021,,,,01-06-2026,

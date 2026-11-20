@@ -1,0 +1,42 @@
+# sqlc v1.31: SQL in queries/**/*.sql → type-safe Go. `make sqlc` regenerates; CI fails if output differs.
+# Two packages on purpose: tenantq runs as sf_app under RLS; platformq runs as sf_platform (BYPASSRLS) and
+# only internal/admin and internal/worker may import it (enforced by depguard in .golangci.yml).
+version: "2"
+sql:
+  - &pkg
+    engine: postgresql
+    schema: migrations
+    queries: queries/tenant
+    gen:
+      go: &go
+        package: tenantq
+        out: internal/store/tenantq
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        emit_empty_slices: true
+        query_parameter_limit: 4 # more than 4 params → a Params struct
+        overrides:
+          # Money is never a bare int64 (platform/money). Applies to every *_paise column.
+          - column: "*.*_paise"
+            go_type: github.com/Shubhamf0073/previa-school-fleet/backend/platform/money.Paise
+          - column: "*.*_paise"
+            nullable: true
+            go_type:
+              import: github.com/Shubhamf0073/previa-school-fleet/backend/platform/money
+              type: Paise
+              pointer: true
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type:
+              import: time
+              type: Time
+              pointer: true
+  - <<: *pkg
+    queries: queries/platform
+    gen:
+      go:
+        <<: *go
+        package: platformq
+        out: internal/store/platformq

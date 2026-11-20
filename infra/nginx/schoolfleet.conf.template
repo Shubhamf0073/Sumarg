@@ -1,0 +1,135 @@
+# Sumarg — host Nginx site (sumarg.previasoftwares.com).
+# Rendered by infra/scripts/render-nginx.sh to /etc/nginx/conf.d/schoolfleet.conf
+# Tokens replaced: __APP_DOMAIN__  __API_PORT__
+# Works with the http{} block of stock Debian/Ubuntu and RHEL/Alma nginx.conf (conf.d is included there).
+
+limit_req_zone $binary_remote_addr zone=sf_login:10m  rate=10r/m;
+limit_req_zone $binary_remote_addr zone=sf_public:10m rate=60r/m;
+
+upstream sf_api {
+    server 127.0.0.1:__API_PORT__;
+    keepalive 16;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __APP_DOMAIN__;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    # "http2" on the listen line works on nginx 1.18–1.24 and still parses (with a notice) on ≥ 1.25.
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name __APP_DOMAIN__;
+
+    ssl_certificate     /etc/ssl/schoolfleet/origin.pem;
+    ssl_certificate_key /etc/ssl/schoolfleet/origin.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_session_cache   shared:sf_tls:10m;
+    ssl_session_timeout 1d;
+
+    include /etc/nginx/snippets/schoolfleet-cloudflare-realip.conf;
+
+    root  /srv/schoolfleet/web/current;
+    index index.html;
+
+    server_tokens off;
+    client_max_body_size 6m;
+    limit_req_status 429;
+
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css application/javascript application/json image/svg+xml;
+
+    access_log /var/log/nginx/schoolfleet.access.log;
+    error_log  /var/log/nginx/schoolfleet.error.log warn;
+
+    # Server-level headers. NB: any location that calls add_header must include this
+    # snippet again, because add_header in a location replaces inherited ones.
+    include /etc/nginx/snippets/schoolfleet-security-headers.conf;
+
+    # ── SPA ──────────────────────────────────────────────────────────
+    location /assets/ {
+        include /etc/nginx/snippets/schoolfleet-security-headers.conf;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        try_files $uri =404;
+    }
+
+    location = /index.html {
+        include /etc/nginx/snippets/schoolfleet-security-headers.conf;
+        add_header Cache-Control "no-cache" always;
+    }
+
+    location / {
+        try_files $uri /index.html;
+    }
+
+    # ── API ──────────────────────────────────────────────────────────
+    location /api/ {
+        include /etc/nginx/snippets/schoolfleet-proxy.conf;
+    }
+
+    location = /api/auth/login {
+        limit_req zone=sf_login burst=5 nodelay;
+        include /etc/nginx/snippets/schoolfleet-proxy.conf;
+    }
+
+    # ── Previa superadmin (optional IP allow-list in schoolfleet-admin-allow.conf) ──
+    location /api/admin/ {
+        include /etc/nginx/snippets/schoolfleet-admin-allow.conf;
+        include /etc/nginx/snippets/schoolfleet-proxy.conf;
+    }
+
+    location = /api/admin/auth/login {
+        include /etc/nginx/snippets/schoolfleet-admin-allow.conf;
+        limit_req zone=sf_login burst=5 nodelay;
+        include /etc/nginx/snippets/schoolfleet-proxy.conf;
+    }
+
+    location /admin {
+        include /etc/nginx/snippets/schoolfleet-admin-allow.conf;
+        include /etc/nginx/snippets/schoolfleet-security-headers.conf;
+        add_header Cache-Control "no-cache" always;
+        add_header X-Robots-Tag "noindex, nofollow" always;
+        # serve the SPA shell from this location (an internal redirect to /index.html would drop these headers)
+        rewrite ^ /index.html break;
+    }
+
+    location = /api/healthz {           # uptime monitor + deploy check: no access log
+        access_log off;
+        include /etc/nginx/snippets/schoolfleet-proxy.conf;
+    }
+
+    # ── Files: only reachable through X-Accel-Redirect from the API ──
+    location /_files/ {
+        internal;
+        alias /srv/schoolfleet/data/files/;
+        include /etc/nginx/snippets/schoolfleet-security-headers.conf;
+        add_header Cache-Control "private, max-age=3600" always;
+    }
+}
+
+# ── Bus units: OTA firmware downloads (docs/14 §8) ──────────────────────────────
+# devices.<domain> is a DNS-only (grey-cloud) record: units connect straight to this server with the Let's Encrypt
+# certificate (ISRG Root X1 is pinned in the firmware). MQTT itself is :8883 on the ingest container, not Nginx.
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name devices.__APP_DOMAIN__;
+    ssl_certificate     /etc/letsencrypt/live/devices.__APP_DOMAIN__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/devices.__APP_DOMAIN__/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    access_log /var/log/nginx/schoolfleet-devices.access.log;
+
+    location /fw/ {                     # signed images only; the unit verifies sha256 + ECDSA before booting one
+        alias /srv/schoolfleet/data/files/firmware/;
+        limit_req zone=sf_public burst=20 nodelay;
+        types { application/octet-stream bin; }
+        default_type application/octet-stream;
+        autoindex off;
+    }
+    location / { return 404; }
+}

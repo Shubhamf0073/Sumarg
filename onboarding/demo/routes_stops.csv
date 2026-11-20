@@ -1,0 +1,17 @@
+campus_code,route_code,route_name,direction,shift,vehicle_reg_no,driver_mobile,attendant_mobile,planned_start,stop_seq,stop_name,lat,lon,maps_link,address,radius_m,planned_offset_min
+MAIN,R-01,Ghuma – Bopal,to_school,regular,GJ01AB1001,9000000011,9000000021,07:00,1,Ghuma Gam,23.0275,72.4430,,,60,0
+MAIN,R-01,Ghuma – Bopal,to_school,regular,GJ01AB1001,9000000011,9000000021,07:00,2,Bopal Gam,23.0310,72.4520,,,60,6
+MAIN,R-01,Ghuma – Bopal,to_school,regular,GJ01AB1001,9000000011,9000000021,07:00,3,Bopal Char Rasta,23.0340,72.4590,,,60,11
+MAIN,R-01,Ghuma – Bopal,to_school,regular,GJ01AB1001,9000000011,9000000021,07:00,4,Ambli Road Corner,23.0345,72.4615,,,60,15
+MAIN,R-02,Shela – South Bopal,to_school,regular,GJ01AB1002,9000000012,,07:05,1,Shela Circle,23.0050,72.4600,,,60,0
+MAIN,R-02,Shela – South Bopal,to_school,regular,GJ01AB1002,9000000012,,07:05,2,Safal Parisar,23.0150,72.4650,,,60,7
+MAIN,R-02,Shela – South Bopal,to_school,regular,GJ01AB1002,9000000012,,07:05,3,Sobo Centre,23.0200,72.4680,,,60,11
+MAIN,R-02,Shela – South Bopal,to_school,regular,GJ01AB1002,9000000012,,07:05,4,Shivalik Society,23.0260,72.4660,,,60,16
+MAIN,R-01,Bopal – Ghuma,from_school,regular,GJ01AB1001,9000000011,9000000021,14:00,1,Ambli Road Corner,23.0345,72.4615,,,60,4
+MAIN,R-01,Bopal – Ghuma,from_school,regular,GJ01AB1001,9000000011,9000000021,14:00,2,Bopal Char Rasta,23.0340,72.4590,,,60,8
+MAIN,R-01,Bopal – Ghuma,from_school,regular,GJ01AB1001,9000000011,9000000021,14:00,3,Bopal Gam,23.0310,72.4520,,,60,13
+MAIN,R-01,Bopal – Ghuma,from_school,regular,GJ01AB1001,9000000011,9000000021,14:00,4,Ghuma Gam,23.0275,72.4430,,,60,19
+MAIN,R-02,South Bopal – Shela,from_school,regular,GJ01AB1002,9000000012,,14:05,1,Shivalik Society,23.0260,72.4660,,,60,4
+MAIN,R-02,South Bopal – Shela,from_school,regular,GJ01AB1002,9000000012,,14:05,2,Sobo Centre,23.0200,72.4680,,,60,9
+MAIN,R-02,South Bopal – Shela,from_school,regular,GJ01AB1002,9000000012,,14:05,3,Safal Parisar,23.0150,72.4650,,,60,13
+MAIN,R-02,South Bopal – Shela,from_school,regular,GJ01AB1002,9000000012,,14:05,4,Shela Circle,23.0050,72.4600,,,60,20

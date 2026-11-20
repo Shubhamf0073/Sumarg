@@ -1,0 +1,159 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      # Pin each action to a commit SHA in M0.7 (Dependabot keeps them current); tags shown for readability.
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Lint (gofmt/goimports, gosec, depguard architecture rules)
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.15.0
+          working-directory: backend
+      - run: go vet -tags integration ./...
+      - uses: sqlc-dev/setup-sqlc@v4
+        with:
+          sqlc-version: "1.31.1"
+      - name: sqlc output committed
+        run: sqlc diff
+      - name: Unit tests (no database)
+        run: go test -race ./...
+      - name: Sumarg roles + test database (same script as production first-init)
+        working-directory: .
+        env:
+          PGHOST: localhost
+          PGPASSWORD: postgres
+          POSTGRES_USER: postgres
+          DB_OWNER_PASSWORD: ci
+          DB_APP_PASSWORD: ci
+          DB_PLATFORM_PASSWORD: ci
+          SF_DB: sf_test
+        run: bash infra/postgres/init/01-roles.sh
+      - name: Migrate (goose, as sf_owner)
+        env:
+          APP_ENV: local
+          SVC_NAME: migrate
+          DATABASE_URL: postgres://sf_owner:ci@localhost:5432/sf_test?sslmode=disable
+        run: go run ./cmd/migrate up
+      - name: Integration tests (tenant isolation first, two tenants)
+        env:
+          TEST_APP_URL: postgres://sf_app:ci@localhost:5432/sf_test?sslmode=disable
+          TEST_PLATFORM_URL: postgres://sf_platform:ci@localhost:5432/sf_test?sslmode=disable
+        run: |
+          go test -tags integration -count=1 ./platform/db/...
+          go test -tags integration -count=1 ./...
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  frontend:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+
+  mobile:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test -- --passWithNoTests
+
+  firmware:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: firmware
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: PlatformIO
+        run: pip install --no-cache-dir "platformio==6.1.*"
+      - name: Logic tests on the host (CI gate)
+        run: pio test -e native
+      # Target builds start once board_pins.h has verified pins for that HW_REV (M7.1); until then they #error.
+      - name: Build prototype firmware
+        if: ${{ hashFiles('firmware/include/board_pins.h') != '' && !contains(github.event.head_commit.message, '[skip-fw-build]') }}
+        run: pio run -e sb_proto || echo "::warning::sb_proto build failed (pins not filled yet?)"
+      - name: Build SB-C1 firmware
+        if: ${{ !contains(github.event.head_commit.message, '[skip-fw-build]') }}
+        run: pio run -e sb_c1 || echo "::warning::sb_c1 build failed (pins not filled yet?)"
+
+  hardware:
+    # Netlist tooling tests always; KiCad ERC/DRC gates only once a KiCad project exists (docs/12, hardware/README.md).
+    runs-on: ubuntu-24.04
+    container:
+      image: kicad/kicad:10.0   # official KiCad image; pin to the team's 10.0.x patch release once chosen
+      options: --user root
+    steps:
+      - uses: actions/checkout@v7
+      - name: Netlist summary tests
+        run: python3 -m unittest discover -s hardware/scripts
+      - name: ERC/DRC gates
+        shell: bash
+        run: |
+          shopt -s nullglob
+          projects=(hardware/*/*.kicad_pro)
+          if [ ${#projects[@]} -eq 0 ]; then echo "no KiCad projects yet"; exit 0; fi
+          for p in "${projects[@]}"; do bash hardware/scripts/export.sh "${p%.kicad_pro}" --check; done
+
+  onboarding:
+    # Executable spec of the onboarding CSV rules + the demo school data (onboarding/README.md)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 -m unittest discover -s onboarding
+      - run: python3 -I onboarding/validate.py onboarding/demo

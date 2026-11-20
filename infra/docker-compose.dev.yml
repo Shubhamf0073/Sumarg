@@ -1,0 +1,29 @@
+# Local development: Postgres 17 only (with Sumarg roles). API and Vite run on the host.
+name: schoolfleet-dev
+
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: dev
+      DB_OWNER_PASSWORD: dev
+      DB_APP_PASSWORD: dev
+      DB_PLATFORM_PASSWORD: dev
+      SF_DB: schoolfleet
+      TZ: UTC
+    command: ["postgres", "-c", "log_min_duration_statement=250ms", "-c", "timezone=UTC"]
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - schoolfleet-dev-pg:/var/lib/postgresql/data
+      - ./postgres/init/01-roles.sh:/docker-entrypoint-initdb.d/01-roles.sh:ro
+      - ./dev/initdb/02-test-db.sql:/docker-entrypoint-initdb.d/02-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d schoolfleet"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  schoolfleet-dev-pg: {}

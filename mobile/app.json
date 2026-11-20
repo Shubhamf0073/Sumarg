@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "Sumarg",
+    "slug": "sumarg",
+    "scheme": "sumarg",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "primaryColor": "#0f2f57",
+    "ios": {
+      "bundleIdentifier": "com.previasoftwares.sumarg",
+      "supportsTablet": false,
+      "config": {
+        "googleMapsApiKey": "SET_IN_EAS_SECRET_IOS_MAPS_KEY"
+      },
+      "infoPlist": {
+        "NSCameraUsageDescription": "Scan a student's QR code when the RFID reader is not working."
+      }
+    },
+    "android": {
+      "package": "com.previasoftwares.sumarg",
+      "config": {
+        "googleMaps": {
+          "apiKey": "SET_IN_EAS_SECRET_ANDROID_MAPS_KEY"
+        }
+      },
+      "permissions": [
+        "POST_NOTIFICATIONS",
+        "CAMERA",
+        "ACCESS_FINE_LOCATION"
+      ],
+      "googleServicesFile": "./google-services.json"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-localization",
+      [
+        "expo-notifications",
+        {
+          "color": "#0f2f57"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Driver app: share the bus location only while a trip is running and the bus unit is offline."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

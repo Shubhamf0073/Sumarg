@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://previa.local/protocol/status.v1.json",
+  "title": "Status / birth / LWT v1 (device -> cloud, retained)",
+  "type": "object",
+  "required": ["v", "online"],
+  "properties": {
+    "v": { "const": 1 },
+    "online": { "type": "boolean" },
+    "did": { "type": "string" },
+    "fw": { "type": "string" },
+    "hw": { "type": "string" },
+    "imei": { "type": "string", "pattern": "^\\d{15}$" },
+    "iccid": { "type": "string", "pattern": "^\\d{18,22}F?$" },
+    "cfgVer": { "type": "integer", "minimum": 0 },
+    "boot": { "type": "integer" },
+    "reset": { "type": "string" },
+    "csq": { "type": "integer" },
+    "op": { "type": "string" },
+    "rat": { "enum": ["GSM", "LTE", "NBIOT", "CATM", "UNKNOWN"] },
+    "sd": { "type": "object", "properties": { "ok": { "type": "boolean" }, "freeMb": { "type": "integer" }, "backlog": { "type": "integer" } } },
+    "gps": { "type": "object", "properties": { "fix": { "type": "integer" }, "sats": { "type": "integer" } } },
+    "vb": { "type": "integer" },
+    "vi": { "type": "integer" },
+    "dip": { "type": "string", "pattern": "^[01]{2}$" }
+  },
+  "if": { "properties": { "online": { "const": true } } },
+  "then": { "required": ["did", "fw", "hw", "cfgVer"] }
+}

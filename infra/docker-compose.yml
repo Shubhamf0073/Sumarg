@@ -1,0 +1,138 @@
+# Sumarg — production stack.
+# Lives at /srv/schoolfleet/compose/ with .env (app settings) and db.env (database-only secrets) beside it.
+# Host Nginx terminates TLS and serves the SPA; the API is on 127.0.0.1 only. The ingest container publishes
+# MQTT/TLS :8883 for the bus units (the only port this stack opens to the internet; docs/06 §2).
+
+name: schoolfleet
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-app: &app
+  # One Go image for api, worker, ingest and the one-off migrate container (docs/02 A4).
+  image: ${API_IMAGE:?set API_IMAGE in .env}:${IMAGE_TAG:?set IMAGE_TAG in .env}
+  env_file: .env                  # never db.env: app containers don't hold superuser/owner passwords
+  environment:
+    SVC_NAME: schoolfleet
+    # Postgres is on the private compose network only, so no TLS (platform/config allows host "db").
+    DATABASE_URL: postgres://sf_app:${DB_APP_PASSWORD:?}@db:5432/${DB_NAME:-schoolfleet}?sslmode=disable
+    PLATFORM_DATABASE_URL: postgres://sf_platform:${DB_PLATFORM_PASSWORD:?}@db:5432/${DB_NAME:-schoolfleet}?sslmode=disable
+  # uid 10001 inside the image; group = host web-server group so host Nginx can read
+  # /srv/schoolfleet/data/files for X-Accel-Redirect (33 = www-data on Debian/Ubuntu).
+  user: "10001:${WEB_GID:-33}"
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:size=32m
+  security_opt:
+    - no-new-privileges:true
+  volumes:
+    - ${DATA_DIR:-/srv/schoolfleet/data}/files:/data/files
+    - ${DATA_DIR:-/srv/schoolfleet/data}/secrets:/data/secrets:ro
+  networks: [schoolfleet]
+  depends_on:
+    db:
+      condition: service_healthy
+  logging: *logging
+  labels:
+    com.previa.project: schoolfleet
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    env_file: db.env              # POSTGRES_USER/PASSWORD + role passwords for first-time init
+    environment:
+      TZ: UTC
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=768MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=30
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - wal_compression=on
+      - -c
+      - log_min_duration_statement=250ms
+      - -c
+      - idle_in_transaction_session_timeout=60s
+      - -c
+      - timezone=UTC
+    volumes:
+      - ${DATA_DIR:-/srv/schoolfleet/data}/pg:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    shm_size: 128m
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks: [schoolfleet]
+    logging: *logging
+    labels:
+      com.previa.project: schoolfleet
+    # No ports: reachable only on the internal network.
+    # Shell: docker compose exec db psql -U postgres schoolfleet
+
+  api:
+    <<: *app
+    command: ["serve", "--mode=api"]
+    ports:
+      - "127.0.0.1:${API_PORT:-8720}:8000"
+    mem_limit: 192m               # Go API ~40–80 MB; live positions cached in memory
+    cpus: 2
+    stop_grace_period: 10s        # app drains requests within 8 s (platform/app.ShutdownGrace)
+    healthcheck:
+      test: ["CMD", "/app/schoolfleet", "healthcheck"]   # internal /readyz (DB ping); distroless has no curl
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  worker:
+    <<: *app
+    command: ["serve", "--mode=worker"]
+    mem_limit: 192m
+    cpus: 1
+    stop_grace_period: 10s
+    healthcheck:
+      test: ["CMD", "/app/schoolfleet", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  ingest:
+    <<: *app
+    command: ["serve", "--mode=ingest"]
+    ports:
+      - "0.0.0.0:${MQTT_PORT:-8883}:8883"   # bus units, MQTT 3.1.1 over TLS (DNS-only host, docs/06 §2)
+    volumes:
+      - ${DATA_DIR:-/srv/schoolfleet/data}/files:/data/files              # boarding photos from units
+      - /etc/letsencrypt/live/${MQTT_HOST:?set MQTT_HOST}:/certs:ro         # renewed by certbot; reloaded on change
+      - /etc/letsencrypt/archive/${MQTT_HOST:?set MQTT_HOST}:/archive/${MQTT_HOST}:ro
+    mem_limit: 256m               # embedded broker + pipeline; ~1–2 KB per connected unit
+    cpus: 1
+    stop_grace_period: 10s
+    healthcheck:
+      test: ["CMD", "/app/schoolfleet", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  schoolfleet:
+    driver: bridge

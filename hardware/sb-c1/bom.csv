@@ -1,0 +1,37 @@
+Ref,Qty,Board,Function,Value / spec,Candidate MPN,Manufacturer,Status,Est. INR incl GST (per unit),Notes
+M1,1,unit,MCU + LTE + GNSS dev board,ESP32-S3-SIM7670G-4G (V2 silkscreen),ESP32-S3-SIM7670G-4G-EN,Waveshare,chosen,5544,Goods-in: chip marked ESP32-S3R8; V2 silkscreen; camera OV5640
+U1,1,carrier,Ideal-diode controller (reverse protection),3.2-65 V,LM74700-Q1,Texas Instruments,verify,90,Or P-FET + zener; designer's choice
+Q1,1,carrier,N-FET for U1,>=60 V >=10 A low Rds,—,—,select,25,
+D1,1,carrier,Input TVS,24 V load-dump class,SMCJ36A,—,verify,30,Size against the ISO 16750-2 pulse chosen in SPEC 2.1
+U2,1,carrier,Buck 5 V 3 A,>=60 V in,TPS54360B,Texas Instruments,verify,180,Alt: LM76005
+L1,1,carrier,Buck inductor,per U2 datasheet,—,—,select,35,Shielded
+C1-C6,6,carrier,Buck input/output ceramics,per U2 datasheet,—,—,select,25,X7R; voltage rating >= 2x
+C7,1,carrier,5 V bulk,>=470 uF low-ESR,—,—,select,30,Polymer preferred (heat)
+U3-U6,4,carrier,Optocouplers (IGN SOS_DRIVER SOS_DOOR TAMPER),CTR>=50% @1 mA,TLP291 / PC817,Toshiba / Sharp,verify,40,
+D2-D5,4,carrier,Input TVS per line,36 V,SMAJ36A,—,verify,20,
+D6-D9,4,carrier,Input reverse diodes,1N4148W-class,1N4148W,—,verify,4,
+R/C misc,1,carrier,Resistors capacitors (0603),—,—,—,select,40,
+U7,1,carrier,Buck enable OR,2-input OR or diode-OR,—,—,select,10,
+J1,1,carrier,Harness connector 8-way locking,>=3 A/contact,Micro-Fit 3.0 2x4 or JST VH,Molex / JST,select,60,Mating plug + crimps in harness line
+J2,1,carrier+panel,Panel connector 10-12 way locking,—,JST GH/PH class,JST,select,40,Both ends + cable
+J3-J4,2,carrier,NTC and tamper 2-pin,—,JST PH 2-pin,JST,select,10,
+H1,1,carrier,Female 2x20 header for Waveshare board,2.54 mm,—,—,select,40,Check Waveshare header layout (40-pin)
+SW1,1,carrier,2-way DIP (installer / verbose),—,—,—,select,15,
+TP,12,carrier,Test points,1 mm pads,—,—,select,0,
+RT1,1,cable,NTC 10k B3435 on lead,—,—,—,select,15,
+PCB-C,1,carrier,Carrier PCB 2-layer + SMT assembly,—,—,—,quote,500,10-100 qty
+U10,1,panel,NFC reader 13.56 MHz,PN532 module or chip + antenna,PN532,NXP,verify,400,Module first; on-board in revB if range OK
+U11,1,panel,OLED 1.3 in,SH1106 128x64 I2C,—,—,select,280,
+BZ1,1,panel,Magnetic buzzer 5 V,>=85 dB@10cm,—,—,select,30,+ driver transistor + diode
+LED1,1,panel,RGB LED,WS2812B-class,—,—,select,10,
+PCB-P,1,panel,Panel PCB 2-layer + assembly,—,—,—,quote,300,
+ANT1,1,unit,LTE antenna + 3 m cable SMA,698-2700 MHz,—,—,select,300,Glass-mount
+ANT2,1,unit,GNSS active antenna + 3 m cable SMA,L1 (+L5 for NavIC on R1),—,—,select,250,
+PIG,2,unit,IPEX/U.FL to SMA bulkhead pigtails,—,—,—,select,50,
+BAT1,1,unit,18650 Li-ion high-temp grade,2600-3000 mAh,—,—,select,350,Only after heat gate passes (docs/12 §5)
+SD1,1,unit,microSD industrial 8 GB,pSLC/industrial,—,—,select,300,
+CAM1,1,unit,Wide-angle camera / longer FPC,OV5640 24-pin,—,—,select,300,If the bundled lens can't see the tap zone
+SOS,2,unit,Latching SOS push buttons (red mushroom),IP65,—,—,select,250,Pair; plus key switch below
+KEY1,1,unit,Key switch to clear SOS,—,—,—,select,50,
+ENC1,1,unit,IP54 enclosure + window + mounts,~160x110x60,—,—,select,700,
+HAR1,1,unit,Vehicle harness with inline 3 A mini-blade fuse,—,—,—,select,350,
