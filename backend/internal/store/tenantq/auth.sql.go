@@ -41,6 +41,40 @@ func (q *Queries) ClaimLoginAttempt(ctx context.Context, id int64) (int64, error
 	return id_2, err
 }
 
+const consumeOTP = `-- name: ConsumeOTP :exec
+UPDATE otp_challenges SET consumed_at = now() WHERE id = $1
+`
+
+// Parent app → verify code: the code matched; it can't be used again.
+func (q *Queries) ConsumeOTP(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, consumeOTP, id)
+	return err
+}
+
+const countOTPAttempt = `-- name: CountOTPAttempt :exec
+UPDATE otp_challenges SET attempts = attempts + 1 WHERE id = $1 AND attempts < 5
+`
+
+// Parent app → verify code: the try is counted before the code is compared (max 5 per challenge).
+func (q *Queries) CountOTPAttempt(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, countOTPAttempt, id)
+	return err
+}
+
+const createOTPChallenge = `-- name: CreateOTPChallenge :one
+INSERT INTO otp_challenges (tenant_id, mobile, code_hash, expires_at, ip)
+VALUES (app_tenant(), $1, $2, now() + interval '5 minutes', $3)
+RETURNING id
+`
+
+// Parent app → request code: valid 5 minutes. Only the HMAC is stored.
+func (q *Queries) CreateOTPChallenge(ctx context.Context, mobile string, codeHash []byte, ip *netip.Addr) (int64, error) {
+	row := q.db.QueryRow(ctx, createOTPChallenge, mobile, codeHash, ip)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (tenant_id, token_hash, user_id, guardian_id, client, install_id, read_only, expires_at, ip, user_agent)
 VALUES (app_tenant(), $1, $2, $3, $4, $5,
@@ -94,6 +128,16 @@ func (q *Queries) CurrentSchool(ctx context.Context) (CurrentSchoolRow, error) {
 	var i CurrentSchoolRow
 	err := row.Scan(&i.ID, &i.Code, &i.DisplayName)
 	return i, err
+}
+
+const endLiveOTPs = `-- name: EndLiveOTPs :exec
+UPDATE otp_challenges SET consumed_at = now() WHERE mobile = $1 AND consumed_at IS NULL
+`
+
+// Parent app → request code: one live challenge per mobile; a new code ends the older ones.
+func (q *Queries) EndLiveOTPs(ctx context.Context, mobile string) error {
+	_, err := q.db.Exec(ctx, endLiveOTPs, mobile)
+	return err
 }
 
 const getSession = `-- name: GetSession :one
@@ -184,6 +228,92 @@ func (q *Queries) GuardianForLogin(ctx context.Context, mobile string) (Guardian
 	return i, err
 }
 
+const liveOTPForVerify = `-- name: LiveOTPForVerify :one
+SELECT id, code_hash, attempts, (expires_at > now())::boolean AS live
+FROM otp_challenges
+WHERE mobile = $1 AND consumed_at IS NULL
+ORDER BY created_at DESC
+LIMIT 1
+FOR UPDATE
+`
+
+type LiveOTPForVerifyRow struct {
+	ID       int64
+	CodeHash []byte
+	Attempts int16
+	Live     bool
+}
+
+// Parent app → verify code: the mobile's newest open challenge, locked so parallel guesses are counted one by one.
+func (q *Queries) LiveOTPForVerify(ctx context.Context, mobile string) (LiveOTPForVerifyRow, error) {
+	row := q.db.QueryRow(ctx, liveOTPForVerify, mobile)
+	var i LiveOTPForVerifyRow
+	err := row.Scan(
+		&i.ID,
+		&i.CodeHash,
+		&i.Attempts,
+		&i.Live,
+	)
+	return i, err
+}
+
+const lockOTPIssue = `-- name: LockOTPIssue :exec
+
+SELECT pg_advisory_xact_lock(hashtextextended('sumarg:otp-issue:' || app_tenant()::text, 0))
+`
+
+// ── Parent OTP (docs/05 §10, docs/07 S4) ──
+// Parent app → request code: serialise code requests within the school, so the per-mobile and per-school counts
+// below can't be raced past (at ≤ 10 SMS a minute per school, the wait is nothing).
+func (q *Queries) LockOTPIssue(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, lockOTPIssue)
+	return err
+}
+
+const oTPIssueCounts = `-- name: OTPIssueCounts :one
+SELECT (SELECT count(*) FROM otp_challenges c
+        WHERE c.mobile = $1 AND c.created_at > now() - interval '1 hour')::integer AS mobile_hour,
+       (SELECT count(*) FROM notifications n
+        WHERE n.event = 'otp' AND n.created_at > now() - interval '1 minute')::integer AS school_minute
+`
+
+type OTPIssueCountsRow struct {
+	MobileHour   int32
+	SchoolMinute int32
+}
+
+// Parent app → request code: codes issued to this mobile in the last hour (max 3) and code SMS queued by the
+// school in the last minute (max 10). Unknown mobiles get a challenge too, so they count the same.
+func (q *Queries) OTPIssueCounts(ctx context.Context, mobile string) (OTPIssueCountsRow, error) {
+	row := q.db.QueryRow(ctx, oTPIssueCounts, mobile)
+	var i OTPIssueCountsRow
+	err := row.Scan(&i.MobileHour, &i.SchoolMinute)
+	return i, err
+}
+
+const queueOTPSMS = `-- name: QueueOTPSMS :exec
+INSERT INTO notifications (tenant_id, guardian_id, event, channel, title, body, data, dedupe_key)
+VALUES (app_tenant(), $1, 'otp', 'sms', '', '', jsonb_build_object('box', $2::text), $3)
+`
+
+// Parent app → request code, invited guardians only: the SMS the worker sends. data.box holds the code sealed for
+// this row (internal/shared/otp); the worker wipes it once the row is settled.
+func (q *Queries) QueueOTPSMS(ctx context.Context, guardianID *int64, box string, dedupeKey string) error {
+	_, err := q.db.Exec(ctx, queueOTPSMS, guardianID, box, dedupeKey)
+	return err
+}
+
+const retireOtherPushTokens = `-- name: RetireOtherPushTokens :exec
+UPDATE push_tokens SET invalid_at = now()
+WHERE session_id = $1 AND id <> $2 AND invalid_at IS NULL
+`
+
+// Parent / driver app → push-token registration: one live token per session, so a rotated token isn't pushed twice.
+func (q *Queries) RetireOtherPushTokens(ctx context.Context, sessionID int64, keepID int64) error {
+	_, err := q.db.Exec(ctx, retireOtherPushTokens, sessionID, keepID)
+	return err
+}
+
 const revokeDriverAppSessions = `-- name: RevokeDriverAppSessions :exec
 UPDATE sessions SET revoked_at = now()
 WHERE user_id = $1 AND client = 'driver_app' AND revoked_at IS NULL
@@ -192,6 +322,17 @@ WHERE user_id = $1 AND client = 'driver_app' AND revoked_at IS NULL
 // Driver app PIN login: one active app session per crew user, so a new phone logs the old one out (docs/05 §10).
 func (q *Queries) RevokeDriverAppSessions(ctx context.Context, userID *int64) error {
 	_, err := q.db.Exec(ctx, revokeDriverAppSessions, userID)
+	return err
+}
+
+const revokeGuardianInstallSessions = `-- name: RevokeGuardianInstallSessions :exec
+UPDATE sessions SET revoked_at = now()
+WHERE guardian_id = $1 AND client = 'parent_app' AND install_id = $2 AND revoked_at IS NULL
+`
+
+// Parent app sign-in: a new session on an install replaces the guardian's older one there (other phones stay).
+func (q *Queries) RevokeGuardianInstallSessions(ctx context.Context, guardianID *int64, installID *string) error {
+	_, err := q.db.Exec(ctx, revokeGuardianInstallSessions, guardianID, installID)
 	return err
 }
 
@@ -301,4 +442,28 @@ WHERE id = $1 AND revoked_at IS NULL
 func (q *Queries) TouchSession(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, touchSession, id)
 	return err
+}
+
+const upsertPushToken = `-- name: UpsertPushToken :one
+
+INSERT INTO push_tokens (tenant_id, session_id, platform, fcm_token, app_version)
+VALUES (app_tenant(), $1, $2, $3, $4)
+ON CONFLICT (tenant_id, fcm_token) DO UPDATE
+SET session_id = excluded.session_id, platform = excluded.platform, app_version = excluded.app_version,
+    updated_at = now(), invalid_at = NULL
+RETURNING id
+`
+
+// ── Push tokens (docs/04 /auth/push-token) ──
+// Parent / driver app → after sign-in and whenever FCM rotates the token: the token belongs to this session now.
+func (q *Queries) UpsertPushToken(ctx context.Context, sessionID int64, platform string, fcmToken string, appVersion string) (int64, error) {
+	row := q.db.QueryRow(ctx, upsertPushToken,
+		sessionID,
+		platform,
+		fcmToken,
+		appVersion,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }

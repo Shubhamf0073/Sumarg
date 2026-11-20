@@ -7,7 +7,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/tenant/auth"
-	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/db"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/httpx"
 )
 
@@ -23,22 +22,22 @@ func registerAPI(api huma.API) {
 //
 // Every operation runs signed in, inside one tenant transaction (db.RequestTx with the session resolver), unless
 // it is listed in gate: a new route is protected by default.
-func mountAPI(r chi.Router, tenants db.Tenants, origins []string) {
-	d := auth.Deps{DB: tenants, Origins: origins}
+func mountAPI(r chi.Router, d auth.Deps) {
 	r.Group(func(r chi.Router) {
-		r.Use(auth.Provide(d), gate(d, tenants.RequestTx(d.Resolve)))
+		r.Use(auth.Provide(d), gate(d, d.DB.RequestTx(d.Resolve)))
 		registerAPI(httpx.NewAPI(r, apiTitle, apiVersion))
 	})
 }
 
-// gate picks what runs in front of each operation. Login resolves its own tenant from the school code; logout
+// gate picks what runs in front of each operation. Sign-in (portal, PIN, parent OTP) resolves its own tenant from
+// the school code; logout
 // needs the session but not the request transaction (a read-only session must still be able to end itself).
 func gate(d auth.Deps, requestTx func(http.Handler) http.Handler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		signedIn, sessionOnly := requestTx(next), d.SessionOnly(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case auth.PathLogin, auth.PathPIN:
+			case auth.PathLogin, auth.PathPIN, auth.PathOTP, auth.PathOTPVerify:
 				next.ServeHTTP(w, r)
 			case auth.PathLogout:
 				sessionOnly.ServeHTTP(w, r)

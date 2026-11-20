@@ -5,14 +5,11 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -75,24 +72,27 @@ func TestParentScope(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	// Each guardian signs in with a real parent_app session (only its hash stored, bound to an install), and the
-	// walk goes through main's router: mountAPI on the sf_app pool, so the session resolver, RLS and the request
+	// Each guardian signs in for real, through the OTP endpoints (the code read back from the outbox as the worker
+	// would), and the walk goes through main's router: mountAPI on the sf_app pool, so the session resolver, RLS and the request
 	// transaction are the production ones.
 	app, err := db.OpenApp(ctx, config.Secret(appURL), db.Options{Name: "test-parent-scope-app", MaxConns: 4})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(app.Close)
+	keys := testOTPKeys(t)
+	r := chi.NewRouter()
+	mountAPI(r, auth.Deps{DB: db.Bind(app), OTP: keys})
+	inPlat := func(ctx context.Context, fn func(pgx.Tx) error) error { return platformdb.InPlatform(ctx, plat, fn) }
 	headers := map[int64]http.Header{}
 	for _, p := range []isolation.Principal{a, b, c} {
-		h, err := parentSession(ctx, func(fn func(pgx.Tx) error) error { return platformdb.InPlatform(ctx, plat, fn) }, p)
+		install := "walker-" + strings.ToLower(rand.Text())
+		tok, err := otpSignIn(ctx, r, keys, inPlat, p.Tenant, p.Guardian, install)
 		if err != nil {
-			t.Fatalf("session for %s: %v", p.Name, err)
+			t.Fatalf("sign-in for %s: %v", p.Name, err)
 		}
-		headers[p.Guardian] = h
+		headers[p.Guardian] = http.Header{"Authorization": {"Bearer " + tok}, auth.InstallHeader: {install}}
 	}
-	r := chi.NewRouter()
-	mountAPI(r, db.Bind(app), nil)
 	w := isolation.Walk{
 		API: httpx.NewSpecAPI(apiTitle, apiVersion), Handler: r, Me: a, Others: []isolation.Principal{b, c},
 		NoIDs: parentNoIDs, Bodies: parentBodies, OwnStatus: parentOwnStatus,
@@ -128,30 +128,6 @@ func TestParentScope(t *testing.T) {
 	if problems := w.Check(ctx); len(problems) > 0 {
 		t.Fatalf("parent scope:\n%s", strings.Join(problems, "\n"))
 	}
-}
-
-// parentSession creates a 90-day parent_app session for p the way OTP login (M1.3) will, and returns the headers
-// the app sends: bearer `<tenant_id>.<token>` plus the install it is bound to.
-func parentSession(ctx context.Context, inPlatform func(func(pgx.Tx) error) error, p isolation.Principal) (http.Header, error) {
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
-		return nil, err
-	}
-	secret := base64.RawURLEncoding.EncodeToString(raw)
-	hash := sha256.Sum256([]byte(secret))
-	install := "walker-" + strings.ToLower(rand.Text())
-	err := inPlatform(func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO sessions (tenant_id, token_hash, guardian_id, client, install_id, expires_at)
-			VALUES ($1, $2, $3, 'parent_app', $4, now() + interval '90 days')`, p.Tenant, hash[:], p.Guardian, install)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	return http.Header{
-		"Authorization":    {"Bearer " + strconv.FormatInt(p.Tenant, 10) + "." + secret},
-		auth.InstallHeader: {install},
-	}, nil
 }
 
 func seedSchool(ctx context.Context, tx pgx.Tx, code string) (tenant, campus, vehicle int64, err error) {

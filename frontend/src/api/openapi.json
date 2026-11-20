@@ -105,6 +105,53 @@
         ],
         "type": "object"
       },
+      "OtpRequestInBody": {
+        "additionalProperties": false,
+        "properties": {
+          "mobile": {
+            "pattern": "^[6-9][0-9]{9}$",
+            "type": "string"
+          },
+          "school_code": {
+            "pattern": "^[A-Za-z0-9-]{3,30}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "school_code",
+          "mobile"
+        ],
+        "type": "object"
+      },
+      "OtpVerifyInBody": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "pattern": "^[0-9]{6}$",
+            "type": "string"
+          },
+          "install_id": {
+            "description": "random id the app made at install; send it as X-Install-Id on every request",
+            "pattern": "^[A-Za-z0-9-]{16,64}$",
+            "type": "string"
+          },
+          "mobile": {
+            "pattern": "^[6-9][0-9]{9}$",
+            "type": "string"
+          },
+          "school_code": {
+            "pattern": "^[A-Za-z0-9-]{3,30}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "school_code",
+          "mobile",
+          "code",
+          "install_id"
+        ],
+        "type": "object"
+      },
       "PinLoginInBody": {
         "additionalProperties": false,
         "properties": {
@@ -137,13 +184,39 @@
       "PinLoginOutBody": {
         "additionalProperties": false,
         "properties": {
+          "client": {
+            "enum": [
+              "web",
+              "driver_app",
+              "parent_app"
+            ],
+            "type": "string"
+          },
+          "guardian": {
+            "$ref": "#/components/schemas/GuardianBody",
+            "description": "parent"
+          },
+          "read_only": {
+            "description": "suspended school or Previa support view: writes are refused",
+            "type": "boolean"
+          },
+          "school": {
+            "$ref": "#/components/schemas/SchoolBody"
+          },
           "token": {
             "description": "send as Authorization: Bearer \u003ctoken\u003e; keep it in expo-secure-store",
             "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserBody",
+            "description": "school staff or crew"
           }
         },
         "required": [
-          "token"
+          "token",
+          "client",
+          "school",
+          "read_only"
         ],
         "type": "object"
       },
@@ -168,6 +241,34 @@
           "school_code",
           "mobile",
           "password"
+        ],
+        "type": "object"
+      },
+      "PushTokenInBody": {
+        "additionalProperties": false,
+        "properties": {
+          "app_version": {
+            "pattern": "^[0-9A-Za-z.+-]{1,32}$",
+            "type": "string"
+          },
+          "fcm_token": {
+            "maxLength": 1024,
+            "minLength": 20,
+            "pattern": "^[A-Za-z0-9_:.-]+$",
+            "type": "string"
+          },
+          "platform": {
+            "enum": [
+              "android",
+              "ios"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "platform",
+          "fcm_token",
+          "app_version"
         ],
         "type": "object"
       },
@@ -241,6 +342,152 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/auth/app/otp": {
+      "post": {
+        "operationId": "auth-otp",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpRequestInBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Parent app sign-in, step 1: school code and mobile → an SMS code to invited guardians (202 for every mobile)",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/app/otp/verify": {
+      "post": {
+        "operationId": "auth-otp-verify",
+        "parameters": [
+          {
+            "description": "an earlier token on this install, if any: it is revoked",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "an earlier token on this install, if any: it is revoked",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpVerifyInBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PinLoginOutBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "423": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Locked"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Parent app sign-in, step 2: the SMS code → bearer token bound to the install (90 days, renewed on use)",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/auth/app/pin": {
       "post": {
         "operationId": "auth-pin",
@@ -473,6 +720,70 @@
           }
         },
         "summary": "Sign out: ends this session",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/push-token": {
+      "post": {
+        "operationId": "auth-push-token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushTokenInBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Parent / driver app: register this install's FCM token for the signed-in session",
         "tags": [
           "auth"
         ]

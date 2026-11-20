@@ -73,7 +73,8 @@ approves → change applied from the next day; audited.
 ## 9. Retention (docs/07 §3)
 Boarding photos `photo_retention_days` (default 30); raw positions `position_retention_days` (default 30, dropped by
 partition); trip paths, boardings, alerts kept for the package term + 1 year; `left` students anonymised 1 year after
-`left_on` (name → "Former student #id", photo deleted, cards revoked).
+`left_on` (name → "Former student #id", photo deleted, cards revoked). Parent-login OTP challenges (mobile, IP) and
+settled code-SMS rows are deleted by the worker after 24 h (the sealed code is wiped as soon as the SMS settles).
 
 ## 10. Sessions and login
 - Portal: school code + mobile + password, `__Host-sf_sid` cookie `<tenant_id>.<token>`, SameSite=Strict, idle 12 h,

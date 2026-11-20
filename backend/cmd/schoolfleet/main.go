@@ -16,9 +16,14 @@ import (
 	"log/slog"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/config"
+	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/shared/otp"
+	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/tenant/auth"
+	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/worker"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/app"
+	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/clock"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/db"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/db/platformdb"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/httpx"
@@ -78,10 +83,25 @@ func setup(ctx context.Context, cfg config.Config, log *slog.Logger) (*app.Runti
 		appPool.Close() // Close is not called when Setup fails
 		return nil, fmt.Errorf("open platform pool: %w", err)
 	}
-	// platPool is handed to /api/admin (M1.4) and ingest (M3).
-	tenants := db.Bind(appPool)
+	fail := func(err error) (*app.Runtime, error) { appPool.Close(); platPool.Close(); return nil, err }
+	keys, err := otp.NewKeys(cfg.SecretsKey.Reveal())
+	if err != nil {
+		return fail(err)
+	}
+	sms, err := worker.NewSMSSender(cfg, log)
+	if err != nil {
+		return fail(err)
+	}
+	// platPool is also handed to /api/admin (M1.4) and ingest (M3).
+	inPlatform := func(ctx context.Context, fn func(pgx.Tx) error) error {
+		return platformdb.InPlatform(ctx, platPool, fn)
+	}
+	deps := auth.Deps{DB: db.Bind(appPool), Origins: cfg.PortalOrigins(), OTP: keys, Limits: auth.NewLimits(clock.System{})}
 	return &app.Runtime{
-		Routes: func(r chi.Router) { mountAPI(r, tenants, cfg.PortalOrigins()) },
+		Routes: func(r chi.Router) { mountAPI(r, deps) },
+		Workers: []func(context.Context) error{
+			worker.OTPSender{DB: inPlatform, Keys: keys, SMS: sms, Log: log}.Run,
+		},
 		Ready: []httpx.Check{
 			{Name: "db-app", Fn: db.Ping(appPool)},
 			{Name: "db-platform", Fn: db.Ping(platPool)},

@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/shared/otp"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/store/tenantq"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/db"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/httpx"
@@ -40,6 +41,10 @@ type Deps struct {
 	DB db.Tenants
 	// Origins accepted on portal login and cookie-authenticated writes (config.PortalOrigins).
 	Origins []string
+	// OTP hashes parent-login codes and seals them for the SMS worker (derived from SECRETS_KEY).
+	OTP otp.Keys
+	// Limits are the per-IP limits of the parent OTP endpoints; nil allows all.
+	Limits *Limits
 }
 
 type depsKey struct{}

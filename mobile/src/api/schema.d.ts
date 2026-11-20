@@ -4,6 +4,40 @@
  */
 
 export interface paths {
+    "/api/auth/app/otp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Parent app sign-in, step 1: school code and mobile → an SMS code to invited guardians (202 for every mobile) */
+        post: operations["auth-otp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/app/otp/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Parent app sign-in, step 2: the SMS code → bearer token bound to the install (90 days, renewed on use) */
+        post: operations["auth-otp-verify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/app/pin": {
         parameters: {
             query?: never;
@@ -49,6 +83,23 @@ export interface paths {
         put?: never;
         /** Sign out: ends this session */
         post: operations["auth-logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/push-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Parent / driver app: register this install's FCM token for the signed-in session */
+        post: operations["auth-push-token"];
         delete?: never;
         options?: never;
         head?: never;
@@ -111,6 +162,17 @@ export interface components {
             /** @description school staff or crew */
             user?: components["schemas"]["UserBody"];
         };
+        OtpRequestInBody: {
+            mobile: string;
+            school_code: string;
+        };
+        OtpVerifyInBody: {
+            code: string;
+            /** @description random id the app made at install; send it as X-Install-Id on every request */
+            install_id: string;
+            mobile: string;
+            school_code: string;
+        };
         PinLoginInBody: {
             /** @description random id the app made at install; send it as X-Install-Id on every request */
             install_id: string;
@@ -119,13 +181,28 @@ export interface components {
             school_code: string;
         };
         PinLoginOutBody: {
+            /** @enum {string} */
+            client: "web" | "driver_app" | "parent_app";
+            /** @description parent */
+            guardian?: components["schemas"]["GuardianBody"];
+            /** @description suspended school or Previa support view: writes are refused */
+            read_only: boolean;
+            school: components["schemas"]["SchoolBody"];
             /** @description send as Authorization: Bearer <token>; keep it in expo-secure-store */
             token: string;
+            /** @description school staff or crew */
+            user?: components["schemas"]["UserBody"];
         };
         PortalLoginInBody: {
             mobile: string;
             password: string;
             school_code: string;
+        };
+        PushTokenInBody: {
+            app_version: string;
+            fcm_token: string;
+            /** @enum {string} */
+            platform: "android" | "ios";
         };
         SchoolBody: {
             code: string;
@@ -155,6 +232,127 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    "auth-otp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OtpRequestInBody"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "auth-otp-verify": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description an earlier token on this install, if any: it is revoked */
+                Authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OtpVerifyInBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PinLoginOutBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Locked */
+            423: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     "auth-pin": {
         parameters: {
             query?: never;
@@ -320,6 +518,64 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "auth-push-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PushTokenInBody"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

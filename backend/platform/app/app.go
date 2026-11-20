@@ -73,6 +73,9 @@ type Runtime struct {
 	Routes func(r chi.Router)
 	// Ready are extra readiness checks: /readyz answers 503 while any of them fails (e.g. the database ping).
 	Ready []httpx.Check
+	// Workers are background loops run in worker mode (and all). Each runs until ctx is cancelled and then returns
+	// nil; an error stops the whole service, like a failed listener.
+	Workers []func(ctx context.Context) error
 	// Close releases what Setup opened. It runs once, after the listeners have stopped, with a context that
 	// expires after CloseGrace.
 	Close func(ctx context.Context) error
@@ -218,8 +221,9 @@ func serve[C Configured](ctx context.Context, s Service[C], args []string, stdou
 		}
 		ls = append(ls, listener{"public", s.PublicAddr, r})
 	}
-	if mode == ModeWorker || mode == ModeAll {
-		log.Info("worker mode: no job workers are registered yet (notification sender arrives in M4)")
+	runWorkers := mode == ModeWorker || mode == ModeAll
+	if runWorkers && len(rt.Workers) == 0 {
+		log.Info("worker mode: no job workers are registered")
 	}
 	if mode == ModeIngest || mode == ModeAll {
 		log.Info("ingest mode: the MQTT broker and telemetry pipeline arrive in M3")
@@ -244,6 +248,12 @@ func serve[C Configured](ctx context.Context, s Service[C], args []string, stdou
 		}
 		srv := httpx.NewServer(l.handler, log)
 		g.Go(func() error { return httpx.Serve(gctx, srv, ln, ShutdownGrace) })
+	}
+
+	if runWorkers {
+		for _, w := range rt.Workers {
+			g.Go(func() error { return w(gctx) })
+		}
 	}
 
 	if err := g.Wait(); err != nil {

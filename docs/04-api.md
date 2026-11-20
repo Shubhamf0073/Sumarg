@@ -17,12 +17,12 @@ Machine contract = OpenAPI 3.1 built by huma from the Go handlers; `make gen-api
 |---|---|---|
 | POST | `/auth/login` | portal: `{school_code, mobile, password}` → cookie |
 | POST | `/auth/app/pin` | driver/attendant: `{school_code, mobile, pin, install_id}` → `{token, user, school}` |
-| POST | `/auth/app/otp` | parent step 1: `{school_code, mobile}` → 202 always (no oracle) |
-| POST | `/auth/app/otp/verify` | `{school_code, mobile, code, install_id}` → `{token, guardian, school}` |
-| POST | `/auth/push-token` | `{platform, fcm_token, app_version}` |
+| POST | `/auth/app/otp` | parent step 1: `{school_code, mobile}` → 202 always (no oracle: unknown school/mobile, over the per-mobile or per-school limit — the SMS goes only to invited guardians, sent by the worker) |
+| POST | `/auth/app/otp/verify` | `{school_code, mobile, code, install_id}` → `{token, client, guardian, school, read_only}`; 90-day session bound to the install, renewed on use; one per guardian per install |
+| POST | `/auth/push-token` | parent/driver app session: `{platform, fcm_token, app_version}` → 204; the token moves to this session, the session's older tokens are retired; portal → 403; read-only session → 204, not stored |
 | POST | `/auth/logout` · GET `/me` | logout → 204 (works for read-only sessions); `/me` → `{client, user?, guardian?, school, read_only}` |
 
-Auth errors: 401 `bad_credentials` (one body for unknown school, unknown mobile, wrong secret, wrong kind of account, backoff), 401 `unauthenticated` (no/invalid/expired session), 403 `csrf_failed`, 423 `school_closed` (cancelled school, shown only after the secret verifies).
+Auth errors: 401 `bad_credentials` (one body for unknown school, unknown mobile, wrong secret, wrong kind of account, backoff), 401 `unauthenticated` (no/invalid/expired session), 403 `csrf_failed`, 423 `school_closed`, 429 `rate_limited` (per client IP on `/auth/app/otp*`: 30 requests / 60 verifies per 10 min; says nothing about the mobile) (cancelled school, shown only after the secret verifies).
 
 ## Parent app (`/parent`)
 | Method | Path | Notes |

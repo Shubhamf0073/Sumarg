@@ -499,7 +499,7 @@ CREATE TABLE otp_challenges (                      -- parent login (SMS OTP); on
     id             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     tenant_id      bigint  NOT NULL REFERENCES tenants(id),
     mobile         text    NOT NULL CHECK (mobile ~ '^[6-9][0-9]{9}$'),
-    code_hash      bytea   NOT NULL,                -- HMAC-SHA256(SECRETS_KEY, code)
+    code_hash      bytea   NOT NULL,                -- HMAC-SHA256(HKDF(SECRETS_KEY), tenant|mobile|code) — internal/shared/otp
     expires_at     timestamptz NOT NULL,            -- 5 min
     attempts       smallint NOT NULL DEFAULT 0 CHECK (attempts <= 5),
     consumed_at    timestamptz,
@@ -508,6 +508,8 @@ CREATE TABLE otp_challenges (                      -- parent login (SMS OTP); on
     UNIQUE (tenant_id, id)
 );
 CREATE INDEX otp_live ON otp_challenges (tenant_id, mobile, created_at DESC) WHERE consumed_at IS NULL;
+CREATE INDEX otp_recent ON otp_challenges (tenant_id, mobile, created_at);   -- per-mobile hourly limit (live or not)
+CREATE INDEX otp_expiry ON otp_challenges (created_at);                      -- worker purge after 24 h
 
 CREATE TABLE push_tokens (
     id             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -756,6 +758,7 @@ CREATE TABLE notifications (                       -- outbox for push/SMS (worke
     CONSTRAINT notifications_one_recipient CHECK (num_nonnulls(guardian_id, user_id) = 1)
 );
 CREATE INDEX notifications_due ON notifications (next_attempt_at) WHERE status = 'queued';
+CREATE INDEX notifications_otp ON notifications (tenant_id, created_at) WHERE event = 'otp';  -- per-school SMS limit, purge
 
 CREATE TABLE announcements (
     id             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

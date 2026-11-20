@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
-	"strings"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
@@ -91,19 +90,9 @@ func login(ctx context.Context, d Deps, req loginRequest) (*loginResult, error) 
 		badCreds = errBadPIN
 	}
 
-	var school tenantq.TenantByCodeRow
-	schoolFound := false
-	err := d.DB.BeforeTenant(ctx, func(tx pgx.Tx) error {
-		var err error
-		school, err = tenantq.New(tx).TenantByCode(ctx, strings.ToLower(req.SchoolCode))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		schoolFound = err == nil
-		return err
-	})
+	school, schoolFound, err := schoolByCode(ctx, d, req.SchoolCode)
 	if err != nil {
-		return nil, fmt.Errorf("auth: school: %w", err)
+		return nil, err
 	}
 
 	// One read-write transaction on every path in a known school: look the user up and, if they may sign in this

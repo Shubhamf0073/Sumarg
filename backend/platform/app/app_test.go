@@ -383,3 +383,58 @@ func TestOpenAPISubcommand(t *testing.T) {
 		t.Fatalf("no OpenAPI: exit %d, want 1", code)
 	}
 }
+
+func TestWorkersRunOnlyInWorkerModes(t *testing.T) {
+	for mode, wantRun := range map[string]bool{"api": false, "worker": true, "all": true} {
+		t.Run(mode, func(t *testing.T) {
+			started, stopped := make(chan struct{}, 1), make(chan struct{}, 1)
+			s := testService()
+			s.Setup = func(context.Context, config.Base, *slog.Logger) (*Runtime, error) {
+				return &Runtime{Workers: []func(context.Context) error{func(ctx context.Context) error {
+					started <- struct{}{}
+					<-ctx.Done()
+					stopped <- struct{}{}
+					return nil
+				}}}, nil
+			}
+			want := []string{"internal"}
+			if mode != "worker" {
+				want = append(want, "public")
+			}
+			st := start(t, s, want, "--mode="+mode)
+			if wantRun {
+				select {
+				case <-started:
+				case <-time.After(5 * time.Second):
+					t.Fatal("worker did not start")
+				}
+			}
+			st.shutdown(t)
+			if wantRun {
+				select {
+				case <-stopped:
+				default:
+					t.Fatal("worker was not stopped by shutdown")
+				}
+			} else if len(started) != 0 {
+				t.Fatal("worker ran in api mode")
+			}
+		})
+	}
+}
+
+func TestFailingWorkerStopsTheService(t *testing.T) {
+	s := testService()
+	s.Setup = func(context.Context, config.Base, *slog.Logger) (*Runtime, error) {
+		return &Runtime{Workers: []func(context.Context) error{func(context.Context) error {
+			return errors.New("outbox broken")
+		}}}, nil
+	}
+	var out syncBuffer
+	if code := run(t.Context(), s, []string{"serve", "--mode=worker"}, &out, &out, baseCfg("schoolfleet"), nil); code != 1 {
+		t.Fatalf("exit %d, want 1:\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "outbox broken") {
+		t.Fatalf("worker error not logged:\n%s", out.String())
+	}
+}

@@ -7,7 +7,7 @@
 | S1 | **Tenant isolation**: forced RLS on every tenant table, composite FKs, tenant from the session only, pools refuse the wrong role, depguard keeps tenant code away from BYPASSRLS code | `platform/db`, schema, `.golangci.yml`, integration tests (two tenants) |
 | S2 | **Parent scope**: every parent request checks the student/route/trip belongs to the guardian's children; live position only while that child's trip runs | `internal/parent`, tests |
 | S3 | Staff passwords Argon2id, no login oracle, backoff not lockout *(Cargo)*; driver PIN with backoff and device binding | `internal/tenant/auth` |
-| S4 | Parent OTP: HMAC-stored, 5 min, 5 tries, per-mobile and per-school rate limits, SMS only to invited guardians, same response otherwise | `internal/parent/auth` |
+| S4 | Parent OTP: HMAC-stored, 5 min, 5 tries, per-mobile and per-school rate limits, SMS only to invited guardians, same response otherwise; the code waits for the worker AES-GCM-sealed in the outbox and is wiped once settled | `internal/tenant/auth`, `internal/shared/otp`, `internal/worker` |
 | S5 | Sessions: token `<tenant_id>.<token>`, only sha256 stored, revoke on logout/role change; apps keep the token in the OS keystore (`expo-secure-store`) | |
 | S6 | Superadmin passkeys only; installer role limited to unit installation screens | `internal/admin` |
 | S7 | **Units**: per-unit secret (argon2id in DB, encrypted NVS on device), MQTT ACL to own topics, tenant from DB not topic, max packet 64 KB, per-unit rate limit, JSON schema validation, unknown units refused and counted | `internal/ingest` |
@@ -20,7 +20,7 @@
 | S14 | Backups encrypted off-site *(Cargo)*; photos excluded from off-site backups (short-lived) | `backup.sh` |
 | S15 | Supply chain: approved-deps list + hooks *(Cargo S26)*; firmware libraries pinned in `platformio.ini`; app deps via `expo install` | `.claude/` |
 | S16 | App: no third-party analytics/ads SDKs; crash reporting only via EAS/OS-level reports without personal data | `mobile/` |
-| S17 | Store-review login: a fixed OTP is accepted **only** for school code `demo`, only for `DEMO_REVIEW_MOBILES`, only while `DEMO_REVIEW_LOGIN=on`; every use is audit-logged; the demo tenant holds fictional data only; the code is rotated after each review | `internal/parent/auth` |
+| S17 | Store-review login: a fixed OTP is accepted **only** for school code `demo`, only for `DEMO_REVIEW_MOBILES`, only while `DEMO_REVIEW_LOGIN=on`; every use is audit-logged; the demo tenant holds fictional data only; the code is rotated after each review | `internal/tenant/auth` (M9.3) |
 | S18 | Onboarding data: school spreadsheets arrive over a channel the school controls (their email/drive link to Previa's role mailbox), are imported once and deleted from laptops within 7 days; import errors reports show row numbers, not children's details | `onboarding/` |
 
 ## 2. Phase 2 hardening
@@ -43,7 +43,7 @@ the app API · MDM-style app attestation (Play Integrity / App Attest) for drive
 - **Minimisation:** the unit holds first names only; the app shows a parent only their own children; crew see names,
   stop and special-needs notes for their own trip only.
 - **Retention:** photos 30 days, raw positions 30 days (both school-configurable within limits), boardings for the
-  package + 1 year, left students anonymised after 1 year (docs/05 §9).
+  package + 1 year, left students anonymised after 1 year, login OTP challenges and code-SMS rows 24 h (docs/05 §9).
 - **Rights:** parents can ask the school for their child's records; the school exports them from the portal
   (Phase 1: CSV of boardings + trip times for that student).
 - **Breach:** platform incident runbook (docs/06 §9) includes notifying the school within 24 h so it can meet the

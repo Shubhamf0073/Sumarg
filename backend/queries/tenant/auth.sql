@@ -95,3 +95,72 @@ UPDATE sessions
 SET last_seen_at = now(),
     expires_at = CASE WHEN client = 'web' THEN expires_at ELSE now() + interval '90 days' END
 WHERE id = @id AND revoked_at IS NULL;
+
+-- ── Parent OTP (docs/05 §10, docs/07 S4) ──
+
+-- name: LockOTPIssue :exec
+-- Parent app → request code: serialise code requests within the school, so the per-mobile and per-school counts
+-- below can't be raced past (at ≤ 10 SMS a minute per school, the wait is nothing).
+SELECT pg_advisory_xact_lock(hashtextextended('sumarg:otp-issue:' || app_tenant()::text, 0));
+
+-- name: OTPIssueCounts :one
+-- Parent app → request code: codes issued to this mobile in the last hour (max 3) and code SMS queued by the
+-- school in the last minute (max 10). Unknown mobiles get a challenge too, so they count the same.
+SELECT (SELECT count(*) FROM otp_challenges c
+        WHERE c.mobile = @mobile AND c.created_at > now() - interval '1 hour')::integer AS mobile_hour,
+       (SELECT count(*) FROM notifications n
+        WHERE n.event = 'otp' AND n.created_at > now() - interval '1 minute')::integer AS school_minute;
+
+-- name: EndLiveOTPs :exec
+-- Parent app → request code: one live challenge per mobile; a new code ends the older ones.
+UPDATE otp_challenges SET consumed_at = now() WHERE mobile = @mobile AND consumed_at IS NULL;
+
+-- name: CreateOTPChallenge :one
+-- Parent app → request code: valid 5 minutes. Only the HMAC is stored.
+INSERT INTO otp_challenges (tenant_id, mobile, code_hash, expires_at, ip)
+VALUES (app_tenant(), @mobile, @code_hash, now() + interval '5 minutes', sqlc.narg(ip))
+RETURNING id;
+
+-- name: QueueOTPSMS :exec
+-- Parent app → request code, invited guardians only: the SMS the worker sends. data.box holds the code sealed for
+-- this row (internal/shared/otp); the worker wipes it once the row is settled.
+INSERT INTO notifications (tenant_id, guardian_id, event, channel, title, body, data, dedupe_key)
+VALUES (app_tenant(), @guardian_id, 'otp', 'sms', '', '', jsonb_build_object('box', @box::text), @dedupe_key);
+
+-- name: LiveOTPForVerify :one
+-- Parent app → verify code: the mobile's newest open challenge, locked so parallel guesses are counted one by one.
+SELECT id, code_hash, attempts, (expires_at > now())::boolean AS live
+FROM otp_challenges
+WHERE mobile = @mobile AND consumed_at IS NULL
+ORDER BY created_at DESC
+LIMIT 1
+FOR UPDATE;
+
+-- name: CountOTPAttempt :exec
+-- Parent app → verify code: the try is counted before the code is compared (max 5 per challenge).
+UPDATE otp_challenges SET attempts = attempts + 1 WHERE id = @id AND attempts < 5;
+
+-- name: ConsumeOTP :exec
+-- Parent app → verify code: the code matched; it can't be used again.
+UPDATE otp_challenges SET consumed_at = now() WHERE id = @id;
+
+-- name: RevokeGuardianInstallSessions :exec
+-- Parent app sign-in: a new session on an install replaces the guardian's older one there (other phones stay).
+UPDATE sessions SET revoked_at = now()
+WHERE guardian_id = @guardian_id AND client = 'parent_app' AND install_id = @install_id AND revoked_at IS NULL;
+
+-- ── Push tokens (docs/04 /auth/push-token) ──
+
+-- name: UpsertPushToken :one
+-- Parent / driver app → after sign-in and whenever FCM rotates the token: the token belongs to this session now.
+INSERT INTO push_tokens (tenant_id, session_id, platform, fcm_token, app_version)
+VALUES (app_tenant(), @session_id, @platform, @fcm_token, @app_version)
+ON CONFLICT (tenant_id, fcm_token) DO UPDATE
+SET session_id = excluded.session_id, platform = excluded.platform, app_version = excluded.app_version,
+    updated_at = now(), invalid_at = NULL
+RETURNING id;
+
+-- name: RetireOtherPushTokens :exec
+-- Parent / driver app → push-token registration: one live token per session, so a rotated token isn't pushed twice.
+UPDATE push_tokens SET invalid_at = now()
+WHERE session_id = @session_id AND id <> @keep_id AND invalid_at IS NULL;

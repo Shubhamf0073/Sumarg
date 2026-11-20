@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -16,7 +17,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/shared/otp"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/tenant/auth"
+	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/worker"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/argon2id"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/config"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/db"
@@ -36,6 +39,8 @@ const (
 // authEnv is the real API (mountAPI on the sf_app pool) plus the platform pool for seeding and inspecting rows.
 type authEnv struct {
 	h    http.Handler
+	keys otp.Keys
+	plat worker.InPlatform
 	exec func(t *testing.T, sql string, args ...any)
 	q    func(t *testing.T, sql string, dst any, args ...any)
 }
@@ -91,9 +96,11 @@ func newAuthEnv(t *testing.T) (*authEnv, school, school) {
 		t.Fatalf("seed: %v", err)
 	}
 
+	keys := testOTPKeys(t)
 	r := chi.NewRouter()
-	mountAPI(r, db.Bind(app), []string{testOrigin})
-	env := &authEnv{h: r}
+	mountAPI(r, auth.Deps{DB: db.Bind(app), Origins: []string{testOrigin}, OTP: keys})
+	env := &authEnv{h: r, keys: keys,
+		plat: func(ctx context.Context, fn func(pgx.Tx) error) error { return platformdb.InPlatform(ctx, plat, fn) }}
 	env.exec = func(t *testing.T, sql string, args ...any) {
 		t.Helper()
 		if _, err := plat.Exec(t.Context(), sql, args...); err != nil {
@@ -107,6 +114,16 @@ func newAuthEnv(t *testing.T) (*authEnv, school, school) {
 		}
 	}
 	return env, a, b
+}
+
+// testOTPKeys derives OTP keys from a key made for this run.
+func testOTPKeys(t *testing.T) otp.Keys {
+	t.Helper()
+	k, err := otp.NewKeys(strings.Repeat("ab", 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k
 }
 
 // ── request helpers ──
