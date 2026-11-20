@@ -2,6 +2,7 @@
 // (docs/02 A4).
 //
 //	schoolfleet serve [--mode=api|worker|ingest|all]   production: three containers; local dev: all
+//	schoolfleet openapi                                print the OpenAPI 3.1 document (make gen-api)
 //	schoolfleet healthcheck                            Docker's healthcheck (distroless: no shell, no curl)
 //
 // HTTP routes: /api (school portal + mobile apps), /api/admin (Previa superadmin). The ingest mode listens for
@@ -10,9 +11,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/config"
@@ -29,11 +32,33 @@ func main() {
 		InternalAddr: ":8090",
 		Modes:        []string{app.ModeAPI, app.ModeWorker, app.ModeIngest, app.ModeAll},
 		Setup:        setup,
+		OpenAPI:      openapi,
 		Public: func(r chi.Router) {
 			r.Get("/api/healthz", httpx.Healthz) // deploy smoke test and uptime monitor call this through Nginx
-			// M0.3+: mount internal/api (school portal + apps) and internal/admin (platform) routers here.
+			registerAPI(httpx.NewAPI(r, apiTitle, apiVersion))
 		},
 	})
+}
+
+const (
+	apiTitle   = "Sumarg API"
+	apiVersion = "1.0.0"
+)
+
+// registerAPI registers every huma operation. `schoolfleet openapi` calls it too, on a throwaway router, so it
+// must not need a database or config: services get their pools from request context, not from here.
+// M1+: register internal/{tenant,parent,driver}/* and internal/admin/* modules here.
+func registerAPI(api huma.API) {}
+
+// openapi renders the document `make gen-api` turns into TypeScript types for the portal and the app.
+func openapi() ([]byte, error) {
+	api := httpx.NewSpecAPI(apiTitle, apiVersion)
+	registerAPI(api)
+	doc, err := json.MarshalIndent(api.OpenAPI(), "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("render openapi: %w", err)
+	}
+	return doc, nil
 }
 
 // setup runs once at start-up, before any listener. It opens the two database pools (sf_app under RLS, sf_platform

@@ -2,6 +2,7 @@
 // declares what is different (name, ports, routes):
 //
 //	<binary> serve [--mode=api|worker|all]   load config, run the public and internal listeners, stop on SIGTERM
+//	<binary> openapi                         print the OpenAPI 3.1 document as JSON (no config needed)
 //	<binary> healthcheck                     GET 127.0.0.1:<internal port>/readyz; exit 0 if ready, else 1
 //
 // healthcheck is what Docker runs (compose: test ["CMD","/app","healthcheck"]): distroless images have no shell or
@@ -61,6 +62,9 @@ type Service[C Configured] struct {
 	// opens what the service needs (database pools, clients) and returns what to wire in. An error stops the
 	// service with exit code 1, and Close is not called, so Setup must clean up after itself when it fails.
 	Setup func(ctx context.Context, cfg C, log *slog.Logger) (*Runtime, error)
+	// OpenAPI, if set, returns the API's OpenAPI document as JSON for `<binary> openapi` (make gen-api). It runs
+	// with no config, database or listener, so it works in CI and on a fresh checkout.
+	OpenAPI func() ([]byte, error)
 }
 
 // Runtime is what Setup hands back to the shared start-up sequence. Every field is optional.
@@ -99,6 +103,21 @@ func run[C Configured](ctx context.Context, s Service[C], args []string, stdout,
 	switch args[0] {
 	case "serve":
 		return serve(ctx, s, args[1:], stdout, stderr, load, listening)
+	case "openapi":
+		if s.OpenAPI == nil {
+			fmt.Fprintf(stderr, "%s openapi: this binary has no HTTP API\n", s.Name)
+			return 1
+		}
+		doc, err := s.OpenAPI()
+		if err != nil {
+			fmt.Fprintf(stderr, "%s openapi: %v\n", s.Name, err)
+			return 1
+		}
+		if _, err := stdout.Write(append(doc, '\n')); err != nil {
+			fmt.Fprintf(stderr, "%s openapi: %v\n", s.Name, err)
+			return 1
+		}
+		return 0
 	case "healthcheck":
 		if err := Healthcheck(ctx, s.InternalAddr); err != nil {
 			fmt.Fprintf(stderr, "%s healthcheck: %v\n", s.Name, err)
@@ -116,7 +135,7 @@ func usage[C Configured](w io.Writer, s Service[C]) {
 	if len(s.Modes) > 0 {
 		mode = " [--mode=" + strings.Join(s.Modes, "|") + "]"
 	}
-	fmt.Fprintf(w, "usage: %s serve%s | healthcheck\n", s.Name, mode)
+	fmt.Fprintf(w, "usage: %s serve%s | openapi | healthcheck\n", s.Name, mode)
 }
 
 func serve[C Configured](ctx context.Context, s Service[C], args []string, stdout, stderr io.Writer,

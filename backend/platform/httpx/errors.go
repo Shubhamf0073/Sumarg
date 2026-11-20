@@ -65,6 +65,8 @@ type errorBody struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`
 	RequestID string `json:"request_id,omitempty"`
+	// Fields is set by huma endpoints for validation errors (see APIError); WriteError never sets it.
+	Fields []FieldError `json:"fields,omitempty"`
 }
 
 // WriteError sends err as the standard error body. An error that isn't an *Error becomes a generic 500, so

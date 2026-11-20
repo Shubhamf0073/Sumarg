@@ -367,3 +367,19 @@ func TestPortInUseFailsAndStopsOthers(t *testing.T) {
 		t.Fatal("serve hung after a listen failure")
 	}
 }
+
+func TestOpenAPISubcommand(t *testing.T) {
+	var out, errOut bytes.Buffer
+	s := Service[config.Base]{Name: "svc", OpenAPI: func() ([]byte, error) { return []byte(`{"openapi":"3.1.0"}`), nil }}
+	// No config loader: the subcommand must not need one.
+	if code := run(context.Background(), s, []string{"openapi"}, &out, &errOut, nil, nil); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	if out.String() != "{\"openapi\":\"3.1.0\"}\n" {
+		t.Fatalf("stdout = %q", out.String())
+	}
+	s.OpenAPI = nil
+	if code := run(context.Background(), s, []string{"openapi"}, &out, &errOut, nil, nil); code != 1 {
+		t.Fatalf("no OpenAPI: exit %d, want 1", code)
+	}
+}

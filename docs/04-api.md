@@ -7,7 +7,7 @@ Machine contract = OpenAPI 3.1 built by huma from the Go handlers; `make gen-api
 | Topic | Rule |
 |---|---|
 | Auth | Portal: cookie `__Host-sf_sid` + CSRF. Apps: `Authorization: Bearer <tenant_id>.<token>` (no cookies, no CSRF). Admin: `__Host-sf_admin` (passkey). |
-| Errors | `{"error":{"code","message","fields"}}`; out-of-scope ids → 404 `not_found` |
+| Errors | flat `{"code","message","request_id","fields"?}` (`fields` = `[{"path","message"}]`, validation errors only); out-of-scope ids → 404 `not_found` |
 | Paging | `?limit=50&after=<cursor>` → `{items, next}` (limit+1) |
 | Idempotency | Manual marks, incidents, SOS from the app carry `Idempotency-Key` |
 | Live | Live endpoints are served from memory, `Cache-Control: no-store`, polled every 10 s only on live screens |

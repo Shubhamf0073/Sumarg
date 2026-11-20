@@ -85,6 +85,7 @@ sqlc: ## Regenerate typed Go from backend/queries/**/*.sql
 	cd backend && sqlc generate
 
 gen-api: ## OpenAPI from the Go handlers → portal and app types
+	mkdir -p frontend/src/api mobile/src/api
 	cd backend && SVC_NAME=schoolfleet go run ./cmd/schoolfleet openapi > ../frontend/src/api/openapi.json
 	cd frontend && npm run gen:api
 	cd mobile && npm run gen:api
