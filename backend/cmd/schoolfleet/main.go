@@ -10,12 +10,15 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/config"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/app"
+	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/db"
+	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/db/platformdb"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/httpx"
 )
 
@@ -33,10 +36,11 @@ func main() {
 	})
 }
 
-// setup runs once at start-up, before any listener. M0.3 opens the two database pools here (sf_app and sf_platform)
-// and returns their readiness checks and Close; for now it records which integrations this process runs with, so a
-// misconfigured server is obvious from its first log lines. Nothing secret is logged: only on/off and names.
-func setup(_ context.Context, cfg config.Config, log *slog.Logger) (*app.Runtime, error) {
+// setup runs once at start-up, before any listener. It opens the two database pools (sf_app under RLS, sf_platform
+// bypassing it), each checked against its expected role, and returns their readiness checks and Close. It also
+// records which integrations this process runs with, so a misconfigured server is obvious from its first log lines.
+// Nothing secret is logged: only on/off and names.
+func setup(ctx context.Context, cfg config.Config, log *slog.Logger) (*app.Runtime, error) {
 	log.Info("configuration loaded",
 		slog.String("app_env", string(cfg.AppEnv)),
 		slog.String("sms_provider", cfg.SMSProvider),
@@ -44,5 +48,37 @@ func setup(_ context.Context, cfg config.Config, log *slog.Logger) (*app.Runtime
 		slog.Bool("maps_enabled", cfg.MapsServerKey != ""),
 		slog.Bool("mqtt_tls", cfg.MQTTCert != ""),
 		slog.Bool("mqtt_plain_dev_port", cfg.MQTTPlainPort != 0))
-	return &app.Runtime{}, nil
+
+	appPool, err := db.OpenApp(ctx, cfg.DatabaseURL, db.Options{Name: "schoolfleet-app", MaxConns: cfg.DBMaxConns})
+	if err != nil {
+		return nil, fmt.Errorf("open app pool: %w", err)
+	}
+	platPool, err := platformdb.Open(ctx, cfg.PlatformDatabaseURL,
+		db.Options{Name: "schoolfleet-platform", MaxConns: cfg.PlatformDBMaxConns})
+	if err != nil {
+		appPool.Close() // Close is not called when Setup fails
+		return nil, fmt.Errorf("open platform pool: %w", err)
+	}
+	// appPool and platPool are handed to the routers in M1 (auth) and M3 (ingest); M0.3 only owns their lifecycle.
+	return &app.Runtime{
+		Ready: []httpx.Check{
+			{Name: "db-app", Fn: db.Ping(appPool)},
+			{Name: "db-platform", Fn: db.Ping(platPool)},
+		},
+		// pool.Close waits for every connection to be released; don't let a stuck one outlast CloseGrace.
+		Close: func(ctx context.Context) error {
+			done := make(chan struct{})
+			go func() {
+				appPool.Close()
+				platPool.Close()
+				close(done)
+			}()
+			select {
+			case <-done:
+				return nil
+			case <-ctx.Done():
+				return fmt.Errorf("close database pools: %w", ctx.Err())
+			}
+		},
+	}, nil
 }
