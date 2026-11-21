@@ -79,6 +79,8 @@ func TestInvalidConfigNamesTheVariable(t *testing.T) {
 			"postgres://sf_platform:p@db.example.com:5432/x?sslmode=disable"), "PLATFORM_DATABASE_URL must set sslmode"},
 		{"same url for both roles", with(production(), "PLATFORM_DATABASE_URL", appURL), "must differ from DATABASE_URL"},
 		{"platform pool too big", with(production(), "PLATFORM_DB_MAX_CONNS", "50"), "PLATFORM_DB_MAX_CONNS"},
+		{"admin session zero", with(production(), "ADMIN_SESSION_HOURS", "0"), "ADMIN_SESSION_HOURS"},
+		{"admin session over a day", with(production(), "ADMIN_SESSION_HOURS", "48"), "ADMIN_SESSION_HOURS"},
 		{"missing secrets key", with(production(), "SECRETS_KEY", "-"), "SECRETS_KEY"},
 		{"short secrets key", with(production(), "SECRETS_KEY", "abcd"), "SECRETS_KEY must be 64 hex"},
 		{"non-hex secrets key", with(production(), "SECRETS_KEY", strings.Repeat("zz", 32)), "SECRETS_KEY must be 64 hex"},

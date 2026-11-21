@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/admin/adminauth"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/isolation"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/tenant/auth"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/config"
@@ -82,7 +83,7 @@ func TestParentScope(t *testing.T) {
 	t.Cleanup(app.Close)
 	keys := testOTPKeys(t)
 	r := chi.NewRouter()
-	mountAPI(r, auth.Deps{DB: db.Bind(app), OTP: keys})
+	mountAPI(r, auth.Deps{DB: db.Bind(app), OTP: keys}, adminauth.Deps{})
 	inPlat := func(ctx context.Context, fn func(pgx.Tx) error) error { return platformdb.InPlatform(ctx, plat, fn) }
 	headers := map[int64]http.Header{}
 	for _, p := range []isolation.Principal{a, b, c} {

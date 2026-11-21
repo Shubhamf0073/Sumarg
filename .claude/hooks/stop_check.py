@@ -77,7 +77,10 @@ if any(f.startswith(("backend/queries/", "backend/migrations/")) for f in files)
 for app in ("frontend", "mobile"):
     ts = [f[len(app) + 1:] for f in files if f.startswith(app + "/") and f.endswith((".ts", ".tsx"))]
     if ts and (root / app / "node_modules/.bin/biome").exists():
-        res = run(["./node_modules/.bin/biome", "check", "--reporter=summary", *ts], root / app)
+        # --no-errors-on-unmatched: when the only changed file is one biome.json ignores (generated schema.d.ts),
+        # there is nothing to check, which is not a problem.
+        res = run(["./node_modules/.bin/biome", "check", "--reporter=summary", "--no-errors-on-unmatched", *ts],
+                  root / app)
         if res.returncode != 0:
             out += (res.stdout + res.stderr).strip().splitlines()
 

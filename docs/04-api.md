@@ -58,7 +58,7 @@ announcements, reports (`GET /school/reports/{kind}.csv?from&to&route`), setting
 follow the paging rule; all writes are audited.
 
 ## Admin (`/admin`, platform pool)
-Auth (passkeys, as Cargo) · schools (onboard wizard, status, package) · subscriptions · invoices (draft/issue/paid/void)
+Auth (passkeys only: `POST /api/admin/auth/enrol/{begin,finish}` with the one-time link's token, `POST /api/admin/auth/login/{begin,finish}` (discoverable), `POST /api/admin/auth/logout`, `GET /api/admin/me`; writes need Origin + `X-CSRF-Token` = `__Host-sf_admin_csrf`) · schools (onboard wizard, status, package) · subscriptions · invoices (draft/issue/paid/void)
 · agents + commissions · units (provision, allocate, install, replace, retire, send command, status history) ·
 firmware releases (upload signed image, channel, staged rollout %, rollout report) · support view · dashboard
 (schools, units online, alerts/day, data per unit) · platform audit.

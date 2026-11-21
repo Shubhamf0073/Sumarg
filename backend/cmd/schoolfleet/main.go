@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/admin/adminauth"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/config"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/shared/otp"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/tenant/auth"
@@ -92,7 +93,7 @@ func setup(ctx context.Context, cfg config.Config, log *slog.Logger) (*app.Runti
 	if err != nil {
 		return fail(err)
 	}
-	// platPool is also handed to /api/admin (M1.4) and ingest (M3).
+	// platPool is also handed to /api/admin and ingest (M3).
 	inPlatform := func(ctx context.Context, fn func(pgx.Tx) error) error {
 		return platformdb.InPlatform(ctx, platPool, fn)
 	}
@@ -103,8 +104,19 @@ func setup(ctx context.Context, cfg config.Config, log *slog.Logger) (*app.Runti
 	deps := auth.Deps{DB: db.Bind(appPool), Origins: cfg.PortalOrigins(), OTP: keys, Device: device,
 		Limits:         auth.NewLimits(clock.System{}),
 		TrustedProxies: cfg.TrustedProxyPrefixes()}
+	// Passkeys are bound to the bare portal host (RP ID): /admin is served there today, and a later admin.<host>
+	// may use its parent as RP ID, so a move would not need every admin to enrol again.
+	rpID := cfg.AppDomain
+	if rpID == "" {
+		rpID = "localhost" // APP_ENV=local (validated): the Vite dev origin
+	}
+	admin, err := adminauth.NewDeps(inPlatform, rpID, cfg.PortalOrigins(), cfg.AdminSessionHours,
+		cfg.TrustedProxyPrefixes(), clock.System{})
+	if err != nil {
+		return fail(err)
+	}
 	return &app.Runtime{
-		Routes: func(r chi.Router) { mountAPI(r, deps) },
+		Routes: func(r chi.Router) { mountAPI(r, deps, admin) },
 		Workers: []func(context.Context) error{
 			worker.OTPSender{DB: inPlatform, Keys: keys, SMS: sms, Log: log}.Run,
 		},

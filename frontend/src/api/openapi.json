@@ -36,6 +36,51 @@
         ],
         "type": "object"
       },
+      "AdminMeBody": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "superadmin",
+              "support",
+              "billing",
+              "installer"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "email",
+          "role"
+        ],
+        "type": "object"
+      },
+      "EnrolBeginInBody": {
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "description": "from the enrolment link's #fragment",
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "type": "object"
+      },
       "FieldError": {
         "additionalProperties": false,
         "properties": {
@@ -342,6 +387,531 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/admin/auth/enrol/begin": {
+      "post": {
+        "operationId": "admin-enrol-begin",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Origin",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnrolBeginInBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {},
+                  "description": "pass .publicKey to navigator.credentials (base64url fields decoded)",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Passkey enrolment, step 1: the one-time link's token → options for navigator.credentials.create",
+        "tags": [
+          "admin-auth"
+        ]
+      }
+    },
+    "/api/admin/auth/enrol/finish": {
+      "post": {
+        "operationId": "admin-enrol-finish",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Origin",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "__Host-sf_admin_cer",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "__Host-sf_admin",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {},
+                "description": "PublicKeyCredential.toJSON()",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminMeBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Passkey enrolment, step 2: the new credential → passkey saved, link used, admin session cookie",
+        "tags": [
+          "admin-auth"
+        ]
+      }
+    },
+    "/api/admin/auth/login/begin": {
+      "post": {
+        "operationId": "admin-login-begin",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Origin",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {},
+                  "description": "pass .publicKey to navigator.credentials (base64url fields decoded)",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Admin sign-in, step 1: options for navigator.credentials.get (discoverable passkey)",
+        "tags": [
+          "admin-auth"
+        ]
+      }
+    },
+    "/api/admin/auth/login/finish": {
+      "post": {
+        "operationId": "admin-login-finish",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Origin",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "__Host-sf_admin_cer",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "__Host-sf_admin",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {},
+                "description": "PublicKeyCredential.toJSON()",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminMeBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Admin sign-in, step 2: the browser's assertion → admin session cookie",
+        "tags": [
+          "admin-auth"
+        ]
+      }
+    },
+    "/api/admin/auth/logout": {
+      "post": {
+        "operationId": "admin-logout",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "__Host-sf_admin",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Admin sign-out: ends this session",
+        "tags": [
+          "admin-auth"
+        ]
+      }
+    },
+    "/api/admin/me": {
+      "get": {
+        "operationId": "admin-me",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminMeBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Which Previa staff member is signed in",
+        "tags": [
+          "admin-auth"
+        ]
+      }
+    },
     "/api/auth/app/otp": {
       "post": {
         "operationId": "auth-otp",
@@ -587,6 +1157,13 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "cookie",
+            "name": "__Host-sf_dev",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -771,6 +1348,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           },
           "500": {
             "content": {

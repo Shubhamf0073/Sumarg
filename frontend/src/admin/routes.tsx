@@ -1,6 +1,8 @@
 import { Navigate, Route, Routes } from "react-router";
 import { Placeholder } from "../pages/placeholder";
-import { Shell } from "../shell/shell";
+import { AdminEnrol } from "./enrol";
+import { AdminLogin } from "./login";
+import { AdminShell } from "./shell";
 
 const ADMIN_NAV = [
   { to: "/admin/schools", label: "Schools" },
@@ -12,7 +14,9 @@ const ADMIN_NAV = [
 export function AdminRoutes() {
   return (
     <Routes>
-      <Route element={<Shell items={ADMIN_NAV} brand="Previa Admin" />}>
+      <Route path="login" element={<AdminLogin />} />
+      <Route path="enrol" element={<AdminEnrol />} />
+      <Route element={<AdminShell items={ADMIN_NAV} />}>
         <Route index element={<Navigate to="schools" replace />} />
         {ADMIN_NAV.map((n) => (
           <Route

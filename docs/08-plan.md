@@ -30,10 +30,22 @@ and its host tests, Expo app config.
   `__Host-sf_dev` cookie) past the 50/day cap at a reduced rate; backoff-table-full warning; cap warning once per
   user per 24 h; `users.locked_until` dropped (00005, approved) + `sessions_user` index; proxy-hop deploy checklist
   in docs/06 §1 (run by the human at the first deploy)
-- [ ] M1.4 Admin passkeys (copy Cargo), onboarding wizard (school, campuses, settings, owner, package) **[review]** — add
-  `ADMIN_SESSION_HOURS` back to `.env.example` once it is read (M1.2b);
-  moving a school to `live` sets `go_live_on` to today (IST) if empty, in the same save (the OTP launch window,
-  docs/05 §10, M1.3a)
+- [x] M1.4a Admin passkeys **[review]** — Cargo has no passkey code (no local folder; `previalogistic` has only the
+  admin-portal design), so `internal/admin/adminauth` is new, on go-webauthn (approved): one-time enrolment link
+  (`migrate create-admin`, 15 min, `#fragment`, sha256 only, replaces earlier links, audited) → discoverable passkey
+  (UV + resident key required) → `__Host-sf_admin` session (absolute `ADMIN_SESSION_HOURS`, back in `.env.example`),
+  Origin + own CSRF cookie on writes, no fixation, clone (sign count) refused; ceremonies single-use in memory
+  (5 min, per-IP 30/10 min, capped); `/api/admin/*` default-closed and never in a tenant tx; `httpx.ClientIP` shared;
+  `/admin/login` + `/admin/enrol` + admin shell; software passkey (`passkeytest`) drives the real verification in
+  tests. Admin host left as is — open question V13
+- [ ] M1.4c Admin auth follow-ups (M1.4a review): audit admin sign-in/sign-out and clone (sign-count) refusals in
+  `platform_audit_log` (the refusal row outside the rolled-back tx); alert on the "ceremony store full" warning and
+  note in docs/06 that ceremonies are in memory (a restart drops those in progress; a distributed flood can 429 real
+  admins for ≤ 5 min); local dev: passkeys work only on `http://localhost:5173` (RP ID `localhost`, not 127.0.0.1,
+  not with `APP_DOMAIN` set locally) — force it or document it in the README
+- [ ] M1.4b Onboarding wizard (school, campuses, settings, owner, package) **[review]** — moving a school to `live`
+  sets `go_live_on` to today (IST) if empty, in the same save (the OTP launch window, docs/05 §10, M1.3a); routes use
+  `adminauth.Require` per role
 - [ ] M1.5 School setup screens: campuses, vehicles, crew, users
 
 ### M2 — Routes, students, cards (2.5 d)

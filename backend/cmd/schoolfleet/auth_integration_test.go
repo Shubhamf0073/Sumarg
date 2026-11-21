@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/admin/adminauth"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/shared/otp"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/tenant/auth"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/worker"
@@ -30,6 +31,7 @@ import (
 
 const (
 	testOrigin   = "https://portal.test"
+	testRPID     = "portal.test"
 	ownerPass    = "correct horse battery"
 	driverPIN    = "482916"
 	installOne   = "install-aaaaaaaaaaaaaaaa"
@@ -106,10 +108,14 @@ func newAuthEnv(t *testing.T) (*authEnv, school, school) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	inPlat := func(ctx context.Context, fn func(pgx.Tx) error) error { return platformdb.InPlatform(ctx, plat, fn) }
+	admin, err := adminauth.NewDeps(inPlat, testRPID, []string{testOrigin}, 12, nil, fake)
+	if err != nil {
+		t.Fatal(err)
+	}
 	mountAPI(r, auth.Deps{DB: db.Bind(app), Origins: []string{testOrigin}, OTP: keys, Device: device,
-		Limits: auth.NewLimits(fake)})
-	env := &authEnv{h: r, clock: fake, keys: keys,
-		plat: func(ctx context.Context, fn func(pgx.Tx) error) error { return platformdb.InPlatform(ctx, plat, fn) }}
+		Limits: auth.NewLimits(fake)}, admin)
+	env := &authEnv{h: r, clock: fake, keys: keys, plat: inPlat}
 	env.exec = func(t *testing.T, sql string, args ...any) {
 		t.Helper()
 		if _, err := plat.Exec(t.Context(), sql, args...); err != nil {

@@ -21,6 +21,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/admin/adminauth"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/shared/otp"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/tenant/auth"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/worker"
@@ -379,7 +380,7 @@ func TestOTPPerIPLimit(t *testing.T) {
 	t.Cleanup(app.Close)
 	r := chi.NewRouter()
 	fake := clock.NewFake(time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC))
-	mountAPI(r, auth.Deps{DB: db.Bind(app), OTP: e.keys, Limits: auth.NewLimits(fake), TrustedProxies: testProxy})
+	mountAPI(r, auth.Deps{DB: db.Bind(app), OTP: e.keys, Limits: auth.NewLimits(fake), TrustedProxies: testProxy}, adminauth.Deps{})
 	ip := func(addr string) map[string]string { return map[string]string{"X-Forwarded-For": addr} }
 	body := map[string]string{"school_code": a.code, "mobile": "9855555555"}
 	for i := range 30 {
@@ -459,7 +460,7 @@ func TestPushTokenLimit(t *testing.T) {
 	t.Cleanup(app.Close)
 	r := chi.NewRouter()
 	fake := clock.NewFake(time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC))
-	mountAPI(r, auth.Deps{DB: db.Bind(app), OTP: e.keys, Limits: auth.NewLimits(fake), TrustedProxies: testProxy})
+	mountAPI(r, auth.Deps{DB: db.Bind(app), OTP: e.keys, Limits: auth.NewLimits(fake), TrustedProxies: testProxy}, adminauth.Deps{})
 	tokA := e.parentToken(t, a, e.guardian(t, a, parentMobile, true), installOne)
 	tokB := e.parentToken(t, b, e.guardian(t, b, parentMobile, true), installOne)
 	push := func(tok string, i int) int {

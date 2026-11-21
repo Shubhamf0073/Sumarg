@@ -3,10 +3,13 @@
 //
 //	migrate up                         apply all pending migrations
 //	migrate status                     list applied / pending
-//	migrate create-admin --email=...   M2.1  first Previa superadmin (prints a one-time passkey enrolment link)
+//	migrate create-admin --email=... [--name=...] [--role=superadmin]
+//	                                   a Previa staff member: prints a one-time passkey enrolment link (15 min);
+//	                                   for an existing user, a new link (lost passkey) and re-activation
 //	migrate seed --sample              M2.1  local/dev only: Previa admin + two sample tenants
 //
-// Environment: APP_ENV, SVC_NAME=migrate, DATABASE_URL (the sf_owner URL; never the app or platform role).
+// Environment: APP_ENV, SVC_NAME=migrate, DATABASE_URL (the sf_owner URL; never the app or platform role);
+// create-admin also APP_DOMAIN (the link's host).
 package main
 
 import (
@@ -26,7 +29,7 @@ import (
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/obs"
 )
 
-var planned = map[string]string{"create-admin": "M2.1", "seed": "M2.1"}
+var planned = map[string]string{"seed": "M2.1"}
 
 func main() { os.Exit(run(context.Background(), os.Args[1:])) }
 
@@ -34,6 +37,9 @@ func run(ctx context.Context, args []string) int {
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: migrate up | status | create-admin --email=... | seed --sample")
 		return 2
+	}
+	if args[0] == "create-admin" {
+		return runCreateAdmin(ctx, args[1:], os.Stdout, os.Stderr)
 	}
 	if m := planned[args[0]]; m != "" {
 		fmt.Fprintf(os.Stderr, "migrate %s: not implemented yet (%s)\n", args[0], m)

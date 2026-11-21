@@ -51,6 +51,9 @@ type Config struct {
 	// outside APP_ENV=local: without it every client would share the gateway address and its per-IP limits.
 	TrustedProxies []string `env:"TRUSTED_PROXIES" envSeparator:","`
 
+	// AdminSessionHours is how long a Previa admin's passkey session lasts, absolute (docs/02 A24). 1–24.
+	AdminSessionHours int `env:"ADMIN_SESSION_HOURS" envDefault:"12"`
+
 	// SecretsKey encrypts secrets stored in the database (64 hex characters = 32 bytes).
 	SecretsKey base.Secret `env:"SECRETS_KEY,required,notEmpty"`
 
@@ -91,6 +94,9 @@ func (c Config) Validate() error {
 
 	if c.PlatformDBMaxConns < 1 || c.PlatformDBMaxConns > 10 {
 		errs = append(errs, fmt.Errorf("PLATFORM_DB_MAX_CONNS must be between 1 and 10, got %d", c.PlatformDBMaxConns))
+	}
+	if c.AdminSessionHours < 1 || c.AdminSessionHours > 24 {
+		errs = append(errs, fmt.Errorf("ADMIN_SESSION_HOURS must be between 1 and 24, got %d", c.AdminSessionHours))
 	}
 	if err := base.CheckDatabaseURL("PLATFORM_DATABASE_URL", c.PlatformDatabaseURL, c.AppEnv); err != nil {
 		errs = append(errs, err)

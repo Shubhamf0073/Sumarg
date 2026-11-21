@@ -67,7 +67,8 @@ Rows marked *(Cargo)* are the same decision as Previa Cargo, kept identical so b
 | A32 | **Agent commission** | Paid on the first package **and every renewal** (`commission_mode = 'recurring'`), on paid invoices only, never negative (docs/10 §5) | Agent stays engaged in renewals and collections | First-year-only (cheaper, decided against on 20 Nov) |
 
 Approved Go modules beyond Cargo's: `mochi-mqtt/server/v2` (A8), `santhosh-tekuri/jsonschema/v6` (protocol validation,
-from Previa Fleet), `golang.org/x/oauth2` (FCM service-account token). Firmware libraries: ArduinoJson, TinyGSM,
+from Previa Fleet), `golang.org/x/oauth2` (FCM service-account token), `go-webauthn/webauthn` v0.18 (A24 admin
+passkeys; Cargo turned out to have none, M1.4a). Firmware libraries: ArduinoJson, TinyGSM,
 MFRC522 (or Adafruit PN532), U8g2, esp32-camera. App: see `.claude/approved-deps.txt`.
 
 ## 3. Request flows
