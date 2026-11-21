@@ -54,7 +54,8 @@ and its host tests, Expo app config.
   whether stages may move backwards and whether going `live` with a *future* planned `go_live_on` should take today
   (the 14-day OTP window starts from the stored date); map other constraint violations (e.g. owner mobile) to 4xx;
   Nginx `sf_login` zone on `/api/auth/set-password` (production infra — ask first); school status changes and
-  package edits (billing role)
+  package edits (billing role); cancel a user's live set-password links without issuing a new one, and deactivate a
+  school login from /admin (ends its sessions; audited) for a link sent to the wrong person
 - [ ] M1.5 School setup screens: campuses, vehicles, crew, users
 
 ### M2 — Routes, students, cards (2.5 d)
