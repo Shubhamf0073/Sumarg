@@ -291,6 +291,27 @@ func (q *Queries) RevokePlatformSessionByHash(ctx context.Context, tokenHash []b
 	return err
 }
 
+const revokePlatformSessionForLogout = `-- name: RevokePlatformSessionForLogout :one
+UPDATE platform_sessions s SET revoked_at = now()
+FROM platform_users u
+WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND u.id = s.platform_user_id
+RETURNING s.id, u.id AS user_id, u.name
+`
+
+type RevokePlatformSessionForLogoutRow struct {
+	ID     int64
+	UserID int64
+	Name   string
+}
+
+// Sign-out: ends the session and names who it was, for the audit row. No rows → it had already ended.
+func (q *Queries) RevokePlatformSessionForLogout(ctx context.Context, tokenHash []byte) (RevokePlatformSessionForLogoutRow, error) {
+	row := q.db.QueryRow(ctx, revokePlatformSessionForLogout, tokenHash)
+	var i RevokePlatformSessionForLogoutRow
+	err := row.Scan(&i.ID, &i.UserID, &i.Name)
+	return i, err
+}
+
 const touchPlatformSession = `-- name: TouchPlatformSession :exec
 UPDATE platform_sessions SET last_seen_at = now() WHERE id = $1 AND revoked_at IS NULL
 `

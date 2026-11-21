@@ -94,6 +94,13 @@ UPDATE platform_sessions SET last_seen_at = now() WHERE id = @id AND revoked_at 
 -- Logout, and sign-in presented with an old admin session (no fixation).
 UPDATE platform_sessions SET revoked_at = now() WHERE token_hash = @token_hash AND revoked_at IS NULL;
 
+-- name: RevokePlatformSessionForLogout :one
+-- Sign-out: ends the session and names who it was, for the audit row. No rows → it had already ended.
+UPDATE platform_sessions s SET revoked_at = now()
+FROM platform_users u
+WHERE s.token_hash = @token_hash AND s.revoked_at IS NULL AND u.id = s.platform_user_id
+RETURNING s.id, u.id AS user_id, u.name;
+
 -- ── Audit ──
 
 -- name: InsertPlatformAudit :exec

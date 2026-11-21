@@ -155,6 +155,17 @@ func TestAdminPasskeyEnrolSignInSignOut(t *testing.T) {
 	if me := e.adminMe(t, second); me.code != http.StatusUnauthorized {
 		t.Fatalf("me after logout: %d, want 401", me.code)
 	}
+
+	// Enrolment and sign-in each started a session; one was signed out (the presented one was revoked, not signed
+	// out).
+	for action, want := range map[string]int{"admin.signed_in": 2, "admin.signed_out": 1} {
+		e.q(t, `SELECT count(*) FROM platform_audit_log
+		        WHERE platform_user_id = $1 AND action = $2 AND entity = 'platform_session' AND entity_id IS NOT NULL`,
+			&n, userID, action)
+		if n != want {
+			t.Fatalf("%s audit rows = %d, want %d", action, n, want)
+		}
+	}
 }
 
 // Admin and school sessions never open each other's routes, for either school.
@@ -251,7 +262,7 @@ func TestAdminPasskeyRefusals(t *testing.T) {
 	})
 
 	t.Run("sign count went backwards", func(t *testing.T) {
-		_, token := e.seedAdmin(t, adminauth.RoleSuperadmin)
+		userID, token := e.seedAdmin(t, adminauth.RoleSuperadmin)
 		pk := newPasskey()
 		signedIn(t, e.enrol(t, token, pk))
 		_, _, ok := e.login(t, pk) // count 1 stored
@@ -260,6 +271,16 @@ func TestAdminPasskeyRefusals(t *testing.T) {
 		pk.Counter = &one
 		if _, _, r := e.login(t, pk); r.code != http.StatusUnauthorized {
 			t.Fatalf("cloned authenticator sign-in: %d, want 401", r.code)
+		}
+		// The refusal is recorded although the sign-in transaction rolled back; no session was started for it.
+		var refusals, signIns int
+		e.q(t, `SELECT count(*) FROM platform_audit_log
+		        WHERE platform_user_id = $1 AND action = 'passkey.clone_refused' AND entity = 'platform_passkey'`,
+			&refusals, userID)
+		e.q(t, `SELECT count(*) FROM platform_audit_log WHERE platform_user_id = $1 AND action = 'admin.signed_in'`,
+			&signIns, userID)
+		if refusals != 1 || signIns != 2 {
+			t.Fatalf("clone_refused rows = %d (want 1), signed_in rows = %d (want 2)", refusals, signIns)
 		}
 	})
 

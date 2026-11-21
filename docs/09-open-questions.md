@@ -18,6 +18,7 @@ Defaults are what the code does until someone answers. ⚠ = blocks a milestone.
 | V11 | If an agent stops working with Previa, do renewal commissions for their schools continue? | stop new rows; pay rows already due | 10 §5 | |
 | V12 | Firebase, Apple and Google developer accounts | organization accounts (D-U-N-S) | 15 §2–§4 | "Need to register and prepare" — 20 Nov |
 | V13 | Admin on its own host (`admin.sumarg.previasoftwares.com`, behind Cloudflare Access) instead of `/admin` on the portal host? Same host means a script injected into the school portal (an unescaped school-entered value) runs with a signed-in admin's cookies; passkeys protect only the sign-in | `/admin` on the portal host (A24) until decided; passkey RP ID is the bare portal host, so a move to `admin.<host>` keeps every passkey (no re-enrolment) | 02 A24, 07 S6 | |
+| V14 | Who is told when the api logs an `alert=…` line (first one: `admin_ceremonies_full`) or `platform_audit_log` gets `passkey.clone_refused`? Nothing watches logs yet | log line + runbook row only (06 §9); a human finds it when reading logs | 06 §9 | |
 
 ## Hardware and firmware
 | # | Question | Default | Ref | Answer |

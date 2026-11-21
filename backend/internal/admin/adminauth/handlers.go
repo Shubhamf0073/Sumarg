@@ -143,10 +143,13 @@ func loginFinish(ctx context.Context, in *credentialIn) (*signedInOut, error) {
 		refused(ctx, "unparseable assertion", err)
 		return nil, ErrSignInFailed
 	}
-	var out *signedInOut
+	var (
+		out    *signedInOut
+		cloned bool
+	)
+	var row platformq.GetPasskeyForLoginRow
 	err = d.DB(ctx, func(tx pgx.Tx) error {
 		q := platformq.New(tx)
-		var row platformq.GetPasskeyForLoginRow
 		lookup := func(rawID, handle []byte) (webauthn.User, error) {
 			var err error
 			row, err = q.GetPasskeyForLogin(ctx, rawID)
@@ -171,6 +174,7 @@ func loginFinish(ctx context.Context, in *credentialIn) (*signedInOut, error) {
 			// The sign count went backwards: two copies of this authenticator may exist. Refuse and tell a human.
 			httpx.Logger(ctx).WarnContext(ctx, "admin passkey sign count went backwards; sign-in refused",
 				slog.Int64("platform_user_id", row.UserID), slog.Int64("passkey_id", row.ID))
+			cloned = true
 			return ErrSignInFailed
 		}
 		stored, err := json.Marshal(cred)
@@ -184,6 +188,15 @@ func loginFinish(ctx context.Context, in *credentialIn) (*signedInOut, error) {
 			Role: row.Role})
 		return err
 	})
+	if cloned {
+		// The sign-in transaction rolled back; the refusal is recorded in its own.
+		if aerr := d.DB(ctx, func(tx pgx.Tx) error {
+			return audit(ctx, platformq.New(tx), in.client, row.UserID, row.Name, "passkey.clone_refused",
+				"platform_passkey", row.ID, "Sign-in refused: the passkey's sign count went backwards (possible copy)")
+		}); aerr != nil {
+			return nil, aerr
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -292,12 +305,8 @@ func enrolFinish(ctx context.Context, in *credentialIn) (*signedInOut, error) {
 		if err != nil {
 			return err
 		}
-		uid, rid := user.id, httpx.RequestID(ctx)
-		if err := q.InsertPlatformAudit(ctx, platformq.InsertPlatformAuditParams{
-			PlatformUserID: &uid, ActorName: user.name, Action: "passkey.enrolled", Entity: "platform_passkey",
-			EntityID: &passkeyID, Summary: "Registered a passkey from an enrolment link", Ip: in.client.ip,
-			RequestID: &rid,
-		}); err != nil {
+		if err := audit(ctx, q, in.client, user.id, user.name, "passkey.enrolled", "platform_passkey", passkeyID,
+			"Registered a passkey from an enrolment link"); err != nil {
 			return err
 		}
 		out, err = d.startSession(ctx, q, in, passkeyID, AdminMeBody{ID: u.ID, Name: u.Name, Email: u.Email,
@@ -314,7 +323,10 @@ func enrolFinish(ctx context.Context, in *credentialIn) (*signedInOut, error) {
 
 type logoutIn struct {
 	Session string `cookie:"__Host-sf_admin"`
+	client  client
 }
+
+func (in *logoutIn) Resolve(ctx huma.Context) []error { in.client.resolve(ctx); return nil }
 
 type logoutOut struct {
 	SetCookie []http.Cookie `header:"Set-Cookie"`
@@ -330,7 +342,16 @@ func logout(ctx context.Context, in *logoutIn) (*logoutOut, error) {
 		return nil, ErrUnauthenticated
 	}
 	if err := d.DB(ctx, func(tx pgx.Tx) error {
-		return platformq.New(tx).RevokePlatformSessionByHash(ctx, hash)
+		q := platformq.New(tx)
+		s, err := q.RevokePlatformSessionForLogout(ctx, hash)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil // already ended: nothing to record, the cookies are cleared anyway
+		}
+		if err != nil {
+			return err
+		}
+		return audit(ctx, q, in.client, s.UserID, s.Name, "admin.signed_out", "platform_session", s.ID,
+			"Signed out of /admin")
 	}); err != nil {
 		return nil, err
 	}
@@ -369,7 +390,9 @@ func preSession(ctx context.Context, origin string, ip *netip.Addr) (Deps, error
 func (d Deps) begun(ctx context.Context, c ceremony, options any) (*beginOut, error) {
 	id, err := d.Ceremonies.put(c)
 	if errors.Is(err, errCeremoniesFull) {
-		httpx.Logger(ctx).WarnContext(ctx, "admin passkey ceremony store full; refusing new ceremonies")
+		// Real admins get 429 until ceremonies expire (≤ 5 min): docs/06 §9. The alert key is stable for log alerts.
+		httpx.Logger(ctx).ErrorContext(ctx, "admin passkey ceremony store full; refusing new ceremonies",
+			slog.String("alert", "admin_ceremonies_full"))
 		return nil, ErrTooMany
 	}
 	if err != nil {
@@ -404,13 +427,18 @@ func (d Deps) startSession(ctx context.Context, q *platformq.Queries, in *creden
 		return nil, err
 	}
 	ua := in.client.userAgent
-	if _, err := q.CreatePlatformSession(ctx, platformq.CreatePlatformSessionParams{
+	sessionID, err := q.CreatePlatformSession(ctx, platformq.CreatePlatformSessionParams{
 		TokenHash: hash, PlatformUserID: who.ID, PasskeyID: passkeyID, LifetimeHours: int32(d.SessionHours),
 		Ip: in.client.ip, UserAgent: &ua,
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
 	if err := q.MarkPlatformLogin(ctx, who.ID); err != nil {
+		return nil, err
+	}
+	if err := audit(ctx, q, in.client, who.ID, who.Name, "admin.signed_in", "platform_session", sessionID,
+		"Signed in to /admin with a passkey"); err != nil {
 		return nil, err
 	}
 	maxAge := d.SessionHours * 3600
@@ -442,6 +470,16 @@ func passkeyLabel(ua string) string {
 		ua = ua[:120]
 	}
 	return ua
+}
+
+// audit appends a platform_audit_log row for a staff member's own sign-in event.
+func audit(ctx context.Context, q *platformq.Queries, c client, userID int64, name, action, entity string,
+	entityID int64, summary string) error {
+	rid := httpx.RequestID(ctx)
+	return q.InsertPlatformAudit(ctx, platformq.InsertPlatformAuditParams{
+		PlatformUserID: &userID, ActorName: name, Action: action, Entity: entity, EntityID: &entityID,
+		Summary: summary, Ip: c.ip, RequestID: &rid,
+	})
 }
 
 // refused logs why a ceremony failed (the library's reason, never the credential) and answers one 401 for all.

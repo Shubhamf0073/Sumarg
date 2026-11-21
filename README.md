@@ -15,6 +15,8 @@ in every bus, a school portal, and one app for parents and drivers — multi-ten
 2. Install Go 1.27, Node 22, Docker, PlatformIO (`pipx install platformio`); `make tools`.
 3. `make dev-db migrate test test-integration` — green on day one (isolation tests, protocol tests, firmware logic tests).
 4. Open Claude Code, run `/next` (starts at M0.1 in docs/08). Three lanes after M1: backend · app/portal · firmware.
+   Admin passkeys locally: open `/admin` on **`http://localhost:5173`** only — the RP ID is `localhost`, so
+   `127.0.0.1` fails, and so does any `APP_DOMAIN` set in your local env (leave it empty; docs/06 §6).
 5. Hardware tasks (**[hw]**) need you at the bench: `/hw-bringup proto` walks through the Waveshare prototype.
 6. Start the long waits now (no code): registrations in `docs/15` §1 (D-U-N-S, DLT entity, M2MSP) and the SB-C1
    designer (`hardware/README.md`, plan M8.1).

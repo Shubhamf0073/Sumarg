@@ -38,7 +38,7 @@ and its host tests, Expo app config.
   (5 min, per-IP 30/10 min, capped); `/api/admin/*` default-closed and never in a tenant tx; `httpx.ClientIP` shared;
   `/admin/login` + `/admin/enrol` + admin shell; software passkey (`passkeytest`) drives the real verification in
   tests. Admin host left as is — open question V13
-- [ ] M1.4c Admin auth follow-ups (M1.4a review): audit admin sign-in/sign-out and clone (sign-count) refusals in
+- [x] M1.4c Admin auth follow-ups (M1.4a review): audit admin sign-in/sign-out and clone (sign-count) refusals in
   `platform_audit_log` (the refusal row outside the rolled-back tx); alert on the "ceremony store full" warning and
   note in docs/06 that ceremonies are in memory (a restart drops those in progress; a distributed flood can 429 real
   admins for ≤ 5 min); local dev: passkeys work only on `http://localhost:5173` (RP ID `localhost`, not 127.0.0.1,

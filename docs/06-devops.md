@@ -61,6 +61,8 @@ make web                   # portal on :5173
 make app                   # Expo dev server (scan with Expo Go / dev build)
 make fw-test               # firmware logic tests on the host (pio test -e native)
 ```
+Admin passkeys (`/admin`) work locally only on `http://localhost:5173`: with `APP_DOMAIN` empty the RP ID is
+`localhost`, which browsers refuse on `127.0.0.1`; setting `APP_DOMAIN` locally makes it the RP ID and breaks Vite.
 
 ## 7. Capacity (shared box)
 RAM caps ≈ 1.65 GB (docs/02 §4) + Cargo ≈ 1.45 GB + existing apps ≈ 2.6 GB → ≈ 5.7 GB of 8 GB. Disk: photos
@@ -79,4 +81,6 @@ regenerated never — accepted). Firmware images and signing records are backed 
 | One unit offline | admin → unit → last status (CSQ, battery, power cut) | call school; installer visit |
 | Taps but no pushes | worker logs, FCM errors (`UNREGISTERED` → token cleanup), `notifications` queue depth | restart worker; check FCM service account |
 | Wrong boarding direction | trip boarding history, unit reboot events | void + re-mark; check `minRideS` |
+| Admins get "Too many attempts" at sign-in; log `alert=admin_ceremonies_full` | api logs for a burst of `/api/admin/auth/*/begin` from many addresses | passkey ceremonies live in api memory (2,000 max, 5 min each): it clears itself within 5 min; block the sources at Cloudflare. A restart also drops ceremonies in progress (admins just retry) |
+| `passkey.clone_refused` in `platform_audit_log` | which staff member and passkey; did they copy or restore the authenticator? | if not explained, revoke that passkey and issue a new enrolment link (`migrate create-admin`) |
 | Data breach suspected | freeze deploys, rotate secrets, preserve logs | notify affected schools within 24 h (docs/07 §3) |
