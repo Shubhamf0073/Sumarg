@@ -25,12 +25,15 @@ const (
 	PathUserLink   = "/api/admin/schools/{id}/users/{user_id}/password-link"
 	PathDeactivate = "/api/admin/schools/{id}/users/{user_id}/deactivate"
 	PathReactivate = "/api/admin/schools/{id}/users/{user_id}/reactivate"
+	PathStatus     = "/api/admin/schools/{id}/status"
+	PathPackage    = "/api/admin/schools/{id}/package/{package_id}"
 )
 
 // Who may do what. Superadmin always may (adminauth.Require).
 var (
 	writers = []string{adminauth.RoleSupport}
 	readers = []string{adminauth.RoleSupport, adminauth.RoleBilling, adminauth.RoleInstaller}
+	billers = []string{adminauth.RoleBilling}
 )
 
 // Register adds the schools operations.
@@ -83,6 +86,18 @@ func Register(api huma.API) {
 		DefaultStatus: http.StatusCreated,
 		Errors:        []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict},
 	}, reactivate)
+	huma.Register(api, huma.Operation{
+		OperationID: "schools-set-status", Method: http.MethodPatch, Path: PathStatus, Tags: tags,
+		Summary: "Change a school's billing status (allowed transitions only; suspend/cancel need a reason; cancelled is final)",
+		Errors: []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict,
+			http.StatusUnprocessableEntity},
+	}, setStatusOp)
+	huma.Register(api, huma.Operation{
+		OperationID: "schools-edit-package", Method: http.MethodPatch, Path: PathPackage, Tags: tags,
+		Summary: "Edit the school's active package: committed students, price per student, start (end = start + 12 months − 1 day)",
+		Errors: []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict,
+			http.StatusUnprocessableEntity},
+	}, editPackageOp)
 }
 
 // ── shapes ──
@@ -240,6 +255,7 @@ type SchoolDetail struct {
 	ContactMobile    string      `json:"contact_mobile"`
 	PriceIncludesGST bool        `json:"price_includes_gst"`
 	AgentID          *int64      `json:"agent_id"`
+	SuspendReason    *string     `json:"suspend_reason" doc:"set while suspended"`
 	Campuses         []CampusRow `json:"campuses"`
 	Logins           []LoginRow  `json:"logins"`
 	Package          *PackageRow `json:"package" doc:"null = no active package"`
@@ -273,6 +289,7 @@ type PackageRow struct {
 	PeriodEnd            string      `json:"period_end" format:"date"`
 	StudentsCommitted    int32       `json:"students_committed"`
 	PricePerStudentPaise money.Paise `json:"price_per_student_paise"`
+	Version              int32       `json:"version" doc:"send back when editing (optimistic lock)"`
 }
 
 type idIn struct {
@@ -379,4 +396,59 @@ func reactivate(ctx context.Context, in *linkIn) (*linkOut, error) {
 		return nil, err
 	}
 	return &linkOut{Body: *l}, nil
+}
+
+type statusIn struct {
+	ID   int64 `path:"id" minimum:"1"`
+	Body struct {
+		FromStatus string  `json:"from_status" enum:"trial,active,past_due,suspended,cancelled" doc:"the status you saw (409 if it changed)"`
+		Status     string  `json:"status" enum:"trial,active,past_due,suspended,cancelled"`
+		Reason     *string `json:"reason,omitempty" maxLength:"500" doc:"required for suspended and cancelled"`
+	}
+	ip *netip.Addr
+}
+
+func (in *statusIn) Resolve(ctx huma.Context) []error { in.ip = adminauth.ClientIP(ctx); return nil }
+
+type statusOut struct {
+	Body struct {
+		Status string `json:"status" enum:"trial,active,past_due,suspended,cancelled"`
+	}
+}
+
+func setStatusOp(ctx context.Context, in *statusIn) (*statusOut, error) {
+	p, err := adminauth.Require(ctx, billers...)
+	if err != nil {
+		return nil, err
+	}
+	st, err := setStatus(ctx, p, in.ip, in.ID, in.Body.FromStatus, in.Body.Status, in.Body.Reason)
+	if err != nil {
+		return nil, err
+	}
+	out := &statusOut{}
+	out.Body.Status = st
+	return out, nil
+}
+
+type packageIn struct {
+	ID        int64 `path:"id" minimum:"1"`
+	PackageID int64 `path:"package_id" minimum:"1"`
+	Body      PackageEdit
+	ip        *netip.Addr
+}
+
+func (in *packageIn) Resolve(ctx huma.Context) []error { in.ip = adminauth.ClientIP(ctx); return nil }
+
+type packageOut struct{ Body PackageRow }
+
+func editPackageOp(ctx context.Context, in *packageIn) (*packageOut, error) {
+	p, err := adminauth.Require(ctx, billers...)
+	if err != nil {
+		return nil, err
+	}
+	row, err := editPackage(ctx, p, in.ip, in.ID, in.PackageID, in.Body)
+	if err != nil {
+		return nil, err
+	}
+	return &packageOut{Body: *row}, nil
 }

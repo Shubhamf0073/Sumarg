@@ -489,6 +489,7 @@ type Subscription struct {
 	Status               string
 	CreatedBy            *int64
 	CreatedAt            time.Time
+	Version              int32
 }
 
 type SystemState struct {

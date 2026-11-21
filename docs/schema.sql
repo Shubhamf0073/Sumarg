@@ -131,6 +131,7 @@ CREATE TABLE subscriptions (                    -- 12-month packages (docs/05 §
     status                   text    NOT NULL DEFAULT 'active' CHECK (status IN ('active','ended','cancelled')),
     created_by               bigint  REFERENCES platform_users(id),
     created_at               timestamptz NOT NULL DEFAULT now(),
+    version                  integer NOT NULL DEFAULT 1,   -- /admin package edits (optimistic lock)
     UNIQUE (tenant_id, id),
     CONSTRAINT subscriptions_period CHECK (period_end > period_start)
 );

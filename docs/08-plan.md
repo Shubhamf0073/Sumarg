@@ -56,7 +56,7 @@ and its host tests, Expo app config.
   zone on `/api/auth/set-password`; cancel a login's unused set-password links (DELETE) and deactivate a school
   login from /admin (sessions ended, links spent; audited), reactivate it with a new link (old password dropped) so
   a school's only owner is never locked out
-- [ ] M1.4e Billing in /admin: school status changes (conditional on `from_status`, allowed transitions) and package
+- [x] M1.4e Billing in /admin: school status changes (conditional on `from_status`, allowed transitions) and package
   edits (billing role, audited)
 - [ ] M1.5 School setup screens: campuses, vehicles, crew, users
 

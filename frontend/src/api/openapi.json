@@ -470,6 +470,41 @@
         ],
         "type": "object"
       },
+      "PackageEdit": {
+        "additionalProperties": false,
+        "properties": {
+          "period_start": {
+            "format": "date",
+            "type": "string"
+          },
+          "price_per_student_paise": {
+            "description": "integer paise; ₹1,000 = 100000",
+            "format": "int64",
+            "maximum": 100000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "students_committed": {
+            "format": "int32",
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "version": {
+            "description": "the version you saw (409 if it changed)",
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "period_start",
+          "students_committed",
+          "price_per_student_paise"
+        ],
+        "type": "object"
+      },
       "PackageIn": {
         "additionalProperties": false,
         "properties": {
@@ -529,6 +564,11 @@
           "students_committed": {
             "format": "int32",
             "type": "integer"
+          },
+          "version": {
+            "description": "send back when editing (optimistic lock)",
+            "format": "int32",
+            "type": "integer"
           }
         },
         "required": [
@@ -536,7 +576,8 @@
           "period_start",
           "period_end",
           "students_committed",
-          "price_per_student_paise"
+          "price_per_student_paise",
+          "version"
         ],
         "type": "object"
       },
@@ -790,6 +831,13 @@
               "cancelled"
             ],
             "type": "string"
+          },
+          "suspend_reason": {
+            "description": "set while suspended",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -803,6 +851,7 @@
           "contact_mobile",
           "price_includes_gst",
           "agent_id",
+          "suspend_reason",
           "campuses",
           "logins",
           "package",
@@ -1092,6 +1141,61 @@
         "required": [
           "onboarding_stage",
           "go_live_on"
+        ],
+        "type": "object"
+      },
+      "StatusInBody": {
+        "additionalProperties": false,
+        "properties": {
+          "from_status": {
+            "description": "the status you saw (409 if it changed)",
+            "enum": [
+              "trial",
+              "active",
+              "past_due",
+              "suspended",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "description": "required for suspended and cancelled",
+            "maxLength": 500,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "trial",
+              "active",
+              "past_due",
+              "suspended",
+              "cancelled"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_status",
+          "status"
+        ],
+        "type": "object"
+      },
+      "StatusOutBody": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "trial",
+              "active",
+              "past_due",
+              "suspended",
+              "cancelled"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
         ],
         "type": "object"
       },
@@ -2004,6 +2108,222 @@
           }
         },
         "summary": "Move a school to another onboarding stage (back too, but not out of `live`); `live` stores at most today (IST)",
+        "tags": [
+          "admin-schools"
+        ]
+      }
+    },
+    "/api/admin/schools/{id}/package/{package_id}": {
+      "patch": {
+        "operationId": "schools-edit-package",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "package_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PackageEdit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PackageRow"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Edit the school's active package: committed students, price per student, start (end = start + 12 months − 1 day)",
+        "tags": [
+          "admin-schools"
+        ]
+      }
+    },
+    "/api/admin/schools/{id}/status": {
+      "patch": {
+        "operationId": "schools-set-status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StatusInBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOutBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Change a school's billing status (allowed transitions only; suspend/cancel need a reason; cancelled is final)",
         "tags": [
           "admin-schools"
         ]

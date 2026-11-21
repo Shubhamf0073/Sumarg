@@ -279,7 +279,7 @@ func (q *Queries) DeactivateSchoolLogin(ctx context.Context, tenantID int64, use
 const getSchool = `-- name: GetSchool :one
 SELECT id, code, legal_name, display_name, short_name, board, gstin, address, city, state_code, contact_name,
        contact_mobile, contact_email, status, onboarding_stage, go_live_on, is_demo, price_per_student_paise,
-       price_includes_gst, agent_id, created_at
+       price_includes_gst, agent_id, suspend_reason, created_at
 FROM tenants
 WHERE id = $1
 `
@@ -305,6 +305,7 @@ type GetSchoolRow struct {
 	PricePerStudentPaise money.Paise
 	PriceIncludesGst     bool
 	AgentID              *int64
+	SuspendReason        *string
 	CreatedAt            time.Time
 }
 
@@ -333,6 +334,7 @@ func (q *Queries) GetSchool(ctx context.Context, id int64) (GetSchoolRow, error)
 		&i.PricePerStudentPaise,
 		&i.PriceIncludesGst,
 		&i.AgentID,
+		&i.SuspendReason,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -357,7 +359,7 @@ func (q *Queries) GetSchoolLogin(ctx context.Context, tenantID int64, userID int
 }
 
 const getSchoolPackage = `-- name: GetSchoolPackage :one
-SELECT id, period_start, period_end, students_committed, price_per_student_paise FROM subscriptions
+SELECT id, period_start, period_end, students_committed, price_per_student_paise, version FROM subscriptions
 WHERE tenant_id = $1 AND status = 'active'
 ORDER BY period_start DESC
 LIMIT 1
@@ -369,6 +371,7 @@ type GetSchoolPackageRow struct {
 	PeriodEnd            pgtype.Date
 	StudentsCommitted    int32
 	PricePerStudentPaise money.Paise
+	Version              int32
 }
 
 // School page: the current package (no row → none yet).
@@ -381,6 +384,37 @@ func (q *Queries) GetSchoolPackage(ctx context.Context, tenantID int64) (GetScho
 		&i.PeriodEnd,
 		&i.StudentsCommitted,
 		&i.PricePerStudentPaise,
+		&i.Version,
+	)
+	return i, err
+}
+
+const getSchoolPackageForEdit = `-- name: GetSchoolPackageForEdit :one
+SELECT id, period_start, period_end, students_committed, price_per_student_paise, version FROM subscriptions
+WHERE tenant_id = $1 AND id = $2 AND status = 'active'
+FOR UPDATE
+`
+
+type GetSchoolPackageForEditRow struct {
+	ID                   int64
+	PeriodStart          pgtype.Date
+	PeriodEnd            pgtype.Date
+	StudentsCommitted    int32
+	PricePerStudentPaise money.Paise
+	Version              int32
+}
+
+// School page → edit package: the active package of this school as it is now, locked for the edit (no row → 404).
+func (q *Queries) GetSchoolPackageForEdit(ctx context.Context, tenantID int64, iD int64) (GetSchoolPackageForEditRow, error) {
+	row := q.db.QueryRow(ctx, getSchoolPackageForEdit, tenantID, iD)
+	var i GetSchoolPackageForEditRow
+	err := row.Scan(
+		&i.ID,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.StudentsCommitted,
+		&i.PricePerStudentPaise,
+		&i.Version,
 	)
 	return i, err
 }
@@ -622,6 +656,43 @@ func (q *Queries) SetOnboardingStage(ctx context.Context, stage string, goLiveOn
 	return i, err
 }
 
+const setSchoolPrice = `-- name: SetSchoolPrice :exec
+UPDATE tenants SET price_per_student_paise = $1, updated_at = now() WHERE id = $2
+`
+
+// School page → edit package: the school's price follows its active package's (the next package starts from it).
+func (q *Queries) SetSchoolPrice(ctx context.Context, pricePerStudentPaise money.Paise, iD int64) error {
+	_, err := q.db.Exec(ctx, setSchoolPrice, pricePerStudentPaise, iD)
+	return err
+}
+
+const setSchoolStatus = `-- name: SetSchoolStatus :one
+UPDATE tenants SET
+    status = $1,
+    suspended_at = CASE WHEN $1::text = 'suspended' THEN now() END,
+    suspend_reason = CASE WHEN $1::text = 'suspended' THEN $2::text END,
+    cancelled_at = CASE WHEN $1::text = 'cancelled' THEN now() ELSE cancelled_at END,
+    updated_at = now()
+WHERE id = $3 AND status = $4
+RETURNING status
+`
+
+// School page → billing status (docs/05 §11). Conditional on the status the billing user saw (0 rows → 404/409); the
+// allowed transitions are checked in Go. Suspending stamps suspended_at + reason, leaving `suspended` clears them;
+// cancelling stamps cancelled_at (cancelled is final). Sessions read the status on every request: suspended →
+// read-only, cancelled → 423, from the next request on.
+func (q *Queries) SetSchoolStatus(ctx context.Context, status string, reason *string, iD int64, fromStatus string) (string, error) {
+	row := q.db.QueryRow(ctx, setSchoolStatus,
+		status,
+		reason,
+		iD,
+		fromStatus,
+	)
+	var status_2 string
+	err := row.Scan(&status_2)
+	return status_2, err
+}
+
 const spendUserSecretLinks = `-- name: SpendUserSecretLinks :exec
 UPDATE user_secret_links SET used_at = now()
 WHERE tenant_id = $1 AND user_id = $2 AND used_at IS NULL
@@ -631,4 +702,42 @@ WHERE tenant_id = $1 AND user_id = $2 AND used_at IS NULL
 func (q *Queries) SpendUserSecretLinks(ctx context.Context, tenantID int64, userID int64) error {
 	_, err := q.db.Exec(ctx, spendUserSecretLinks, tenantID, userID)
 	return err
+}
+
+const updateSchoolPackage = `-- name: UpdateSchoolPackage :one
+UPDATE subscriptions SET
+    students_committed = $1,
+    price_per_student_paise = $2,
+    period_start = $3,
+    period_end = $4,
+    version = version + 1
+WHERE tenant_id = $5 AND id = $6 AND status = 'active' AND version = $7
+RETURNING version
+`
+
+type UpdateSchoolPackageParams struct {
+	StudentsCommitted    int32
+	PricePerStudentPaise money.Paise
+	PeriodStart          pgtype.Date
+	PeriodEnd            pgtype.Date
+	TenantID             int64
+	ID                   int64
+	Version              int32
+}
+
+// School page → edit package: committed students, price and start (period_end computed in Go), conditional on the
+// version the billing user saw (0 rows → 409).
+func (q *Queries) UpdateSchoolPackage(ctx context.Context, arg UpdateSchoolPackageParams) (int32, error) {
+	row := q.db.QueryRow(ctx, updateSchoolPackage,
+		arg.StudentsCommitted,
+		arg.PricePerStudentPaise,
+		arg.PeriodStart,
+		arg.PeriodEnd,
+		arg.TenantID,
+		arg.ID,
+		arg.Version,
+	)
+	var version int32
+	err := row.Scan(&version)
+	return version, err
 }

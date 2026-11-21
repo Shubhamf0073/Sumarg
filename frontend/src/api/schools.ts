@@ -145,3 +145,45 @@ export function useReactivateLogin(schoolId: number) {
     onSettled: () => qc.invalidateQueries({ queryKey: SCHOOLS }),
   });
 }
+
+export type Status = SchoolRow["status"];
+export type PackageEdit = components["schemas"]["PackageEdit"];
+
+/** Billing status moves /admin allows (mirrors the API; the API enforces). cancelled is final. */
+export const TRANSITIONS: Record<Status, Status[]> = {
+  trial: ["active", "cancelled"],
+  active: ["past_due", "suspended", "cancelled"],
+  past_due: ["active", "suspended", "cancelled"],
+  suspended: ["active", "past_due", "cancelled"],
+  cancelled: [],
+};
+
+export function useSetStatus(id: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { from_status: Status; status: Status; reason?: string }) => {
+      const { data, error, response } = await api.PATCH("/api/admin/schools/{id}/status", {
+        params: { path: { id } },
+        body,
+      });
+      if (error || !data) fail(response.status, error?.message, "Could not change the status.");
+      return data;
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: SCHOOLS }),
+  });
+}
+
+export function useEditPackage(id: number, packageId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: PackageEdit) => {
+      const { data, error, response } = await api.PATCH(
+        "/api/admin/schools/{id}/package/{package_id}",
+        { params: { path: { id, package_id: packageId } }, body },
+      );
+      if (error || !data) fail(response.status, error?.message, "Could not save the package.");
+      return data;
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: SCHOOLS }),
+  });
+}

@@ -158,6 +158,40 @@ export interface paths {
         patch: operations["schools-set-stage"];
         trace?: never;
     };
+    "/api/admin/schools/{id}/package/{package_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Edit the school's active package: committed students, price per student, start (end = start + 12 months − 1 day) */
+        patch: operations["schools-edit-package"];
+        trace?: never;
+    };
+    "/api/admin/schools/{id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Change a school's billing status (allowed transitions only; suspend/cancel need a reason; cancelled is final) */
+        patch: operations["schools-set-status"];
+        trace?: never;
+    };
     "/api/admin/schools/{id}/users/{user_id}/deactivate": {
         parameters: {
             query?: never;
@@ -484,6 +518,22 @@ export interface components {
             mobile: string;
             name: string;
         };
+        PackageEdit: {
+            /** Format: date */
+            period_start: string;
+            /**
+             * Format: int64
+             * @description integer paise; ₹1,000 = 100000
+             */
+            price_per_student_paise: number;
+            /** Format: int32 */
+            students_committed: number;
+            /**
+             * Format: int32
+             * @description the version you saw (409 if it changed)
+             */
+            version: number;
+        };
         PackageIn: {
             /** Format: int64 */
             agent_id?: number;
@@ -510,6 +560,11 @@ export interface components {
             price_per_student_paise: number;
             /** Format: int32 */
             students_committed: number;
+            /**
+             * Format: int32
+             * @description send back when editing (optimistic lock)
+             */
+            version: number;
         };
         PinLoginInBody: {
             /** @description random id the app made at install; send it as X-Install-Id on every request */
@@ -577,6 +632,8 @@ export interface components {
             state_code: string;
             /** @enum {string} */
             status: "trial" | "active" | "past_due" | "suspended" | "cancelled";
+            /** @description set while suspended */
+            suspend_reason: string | null;
         };
         SchoolIn: {
             address: string;
@@ -672,6 +729,21 @@ export interface components {
             /** Format: date */
             go_live_on: string | null;
             onboarding_stage: string;
+        };
+        StatusInBody: {
+            /**
+             * @description the status you saw (409 if it changed)
+             * @enum {string}
+             */
+            from_status: "trial" | "active" | "past_due" | "suspended" | "cancelled";
+            /** @description required for suspended and cancelled */
+            reason?: string;
+            /** @enum {string} */
+            status: "trial" | "active" | "past_due" | "suspended" | "cancelled";
+        };
+        StatusOutBody: {
+            /** @enum {string} */
+            status: "trial" | "active" | "past_due" | "suspended" | "cancelled";
         };
         UserBody: {
             /**
@@ -1305,6 +1377,167 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StageOutBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "schools-edit-package": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                package_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PackageEdit"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackageRow"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "schools-set-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StatusInBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusOutBody"];
                 };
             };
             /** @description Unauthorized */

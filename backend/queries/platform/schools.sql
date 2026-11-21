@@ -69,13 +69,13 @@ LIMIT @lim;
 -- School page: the school.
 SELECT id, code, legal_name, display_name, short_name, board, gstin, address, city, state_code, contact_name,
        contact_mobile, contact_email, status, onboarding_stage, go_live_on, is_demo, price_per_student_paise,
-       price_includes_gst, agent_id, created_at
+       price_includes_gst, agent_id, suspend_reason, created_at
 FROM tenants
 WHERE id = @id;
 
 -- name: GetSchoolPackage :one
 -- School page: the current package (no row → none yet).
-SELECT id, period_start, period_end, students_committed, price_per_student_paise FROM subscriptions
+SELECT id, period_start, period_end, students_committed, price_per_student_paise, version FROM subscriptions
 WHERE tenant_id = @tenant_id AND status = 'active'
 ORDER BY period_start DESC
 LIMIT 1;
@@ -141,3 +141,39 @@ WHERE tenant_id = @tenant_id AND user_id = @user_id AND revoked_at IS NULL;
 -- 404/409).
 UPDATE users SET is_active = true, password_hash = @password_hash, must_change_secret = true, version = version + 1
 WHERE tenant_id = @tenant_id AND id = @user_id AND role IN ('owner','admin') AND NOT is_active;
+
+-- name: SetSchoolStatus :one
+-- School page → billing status (docs/05 §11). Conditional on the status the billing user saw (0 rows → 404/409); the
+-- allowed transitions are checked in Go. Suspending stamps suspended_at + reason, leaving `suspended` clears them;
+-- cancelling stamps cancelled_at (cancelled is final). Sessions read the status on every request: suspended →
+-- read-only, cancelled → 423, from the next request on.
+UPDATE tenants SET
+    status = @status,
+    suspended_at = CASE WHEN @status::text = 'suspended' THEN now() END,
+    suspend_reason = CASE WHEN @status::text = 'suspended' THEN sqlc.narg(reason)::text END,
+    cancelled_at = CASE WHEN @status::text = 'cancelled' THEN now() ELSE cancelled_at END,
+    updated_at = now()
+WHERE id = @id AND status = @from_status
+RETURNING status;
+
+-- name: GetSchoolPackageForEdit :one
+-- School page → edit package: the active package of this school as it is now, locked for the edit (no row → 404).
+SELECT id, period_start, period_end, students_committed, price_per_student_paise, version FROM subscriptions
+WHERE tenant_id = @tenant_id AND id = @id AND status = 'active'
+FOR UPDATE;
+
+-- name: UpdateSchoolPackage :one
+-- School page → edit package: committed students, price and start (period_end computed in Go), conditional on the
+-- version the billing user saw (0 rows → 409).
+UPDATE subscriptions SET
+    students_committed = @students_committed,
+    price_per_student_paise = @price_per_student_paise,
+    period_start = @period_start,
+    period_end = @period_end,
+    version = version + 1
+WHERE tenant_id = @tenant_id AND id = @id AND status = 'active' AND version = @version
+RETURNING version;
+
+-- name: SetSchoolPrice :exec
+-- School page → edit package: the school's price follows its active package's (the next package starts from it).
+UPDATE tenants SET price_per_student_paise = @price_per_student_paise, updated_at = now() WHERE id = @id;

@@ -229,7 +229,7 @@ func getSchool(ctx context.Context, id int64) (*SchoolDetail, error) {
 				Stage: s.OnboardingStage, GoLiveOn: dateOut(s.GoLiveOn), IsDemo: s.IsDemo, Created: s.CreatedAt},
 			LegalName: s.LegalName, ShortName: s.ShortName, Board: s.Board, GSTIN: s.Gstin, City: s.City,
 			StateCode: s.StateCode, ContactName: s.ContactName, ContactMobile: s.ContactMobile,
-			PriceIncludesGST: s.PriceIncludesGst, AgentID: s.AgentID,
+			PriceIncludesGST: s.PriceIncludesGst, AgentID: s.AgentID, SuspendReason: s.SuspendReason,
 			Campuses: []CampusRow{}, Logins: []LoginRow{},
 		}
 		campuses, err := q.ListSchoolCampuses(ctx, id)
@@ -256,7 +256,7 @@ func getSchool(ctx context.Context, id int64) (*SchoolDetail, error) {
 			return err
 		}
 		d.Package = &PackageRow{ID: pkg.ID, PeriodStart: *dateOut(pkg.PeriodStart), PeriodEnd: *dateOut(pkg.PeriodEnd),
-			StudentsCommitted: pkg.StudentsCommitted, PricePerStudentPaise: pkg.PricePerStudentPaise}
+			StudentsCommitted: pkg.StudentsCommitted, PricePerStudentPaise: pkg.PricePerStudentPaise, Version: pkg.Version}
 		return nil
 	})
 	if err != nil {

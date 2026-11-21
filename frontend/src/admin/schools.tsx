@@ -1,20 +1,25 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router";
+import { useAdminMe } from "../api/admin";
 import {
   type LinkBody,
   type SchoolDetail,
   STAGES,
   type Stage,
+  type Status,
+  TRANSITIONS,
   useCancelPasswordLink,
   useDeactivateLogin,
+  useEditPackage,
   useMoveStage,
   useNewPasswordLink,
   useReactivateLogin,
   useSchool,
   useSchools,
+  useSetStatus,
 } from "../api/schools";
 import { formatDate } from "../lib/dates";
-import { rupees } from "../lib/money";
+import { paiseFromRupees, rupees } from "../lib/money";
 
 const STATUS_BADGE: Record<string, string> = {
   trial: "bd-blue",
@@ -145,7 +150,7 @@ function SchoolView({ s }: { s: SchoolDetail }) {
       <h1 className="fs20 b mt4">{s.display_name}</h1>
       <p className="mut">
         {s.legal_name} · {s.city} · {s.board ?? "board not set"} ·{" "}
-        <span className="bd bd-blue">{s.status}</span>
+        <span className={`bd ${STATUS_BADGE[s.status] ?? "bd-gray"}`}>{s.status}</span>
       </p>
 
       <section className="card mt16">
@@ -209,6 +214,8 @@ function SchoolView({ s }: { s: SchoolDetail }) {
       </section>
 
       <Logins s={s} />
+
+      <Billing s={s} />
 
       <section className="card mt16">
         <div className="card-h">
@@ -365,5 +372,170 @@ function Logins({ s }: { s: SchoolDetail }) {
       {done && <p className="mut mt8">{done}</p>}
       {link && <OneTimeLink link={link} />}
     </section>
+  );
+}
+
+const NEEDS_REASON: Status[] = ["suspended", "cancelled"];
+
+/** Billing (billing role or superadmin; the API enforces): status changes and edits to the active package. */
+function Billing({ s }: { s: SchoolDetail }) {
+  const me = useAdminMe();
+  const role = me.data?.role;
+  if (role !== "billing" && role !== "superadmin") return null;
+  const pkg = s.package as SchoolDetail["package"] | null;
+  return (
+    <section className="card mt16">
+      <div className="card-h">
+        <span className="card-t">Billing</span>
+      </div>
+      <div className="card-b">
+        <StatusForm key={s.status} s={s} />
+        {pkg && <PackageForm key={`${pkg.id}.${pkg.version}`} s={s} pkg={pkg} />}
+      </div>
+    </section>
+  );
+}
+
+function StatusForm({ s }: { s: SchoolDetail }) {
+  const set = useSetStatus(s.id);
+  const next = TRANSITIONS[s.status];
+  const [to, setTo] = useState<Status | "">(next[0] ?? "");
+  const [reason, setReason] = useState("");
+  const [typed, setTyped] = useState("");
+  if (next.length === 0) {
+    return <p className="mut">Cancelled is final: this school can't be reopened from here.</p>;
+  }
+  const needsReason = to !== "" && NEEDS_REASON.includes(to);
+  const cancelling = to === "cancelled";
+  const ready =
+    to !== "" && (!needsReason || reason.trim() !== "") && (!cancelling || typed === s.code);
+  return (
+    <form
+      className="row"
+      style={{ gap: 8, alignItems: "end", flexWrap: "wrap" }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!ready) return;
+        set.mutate({
+          from_status: s.status,
+          status: to,
+          ...(needsReason ? { reason: reason.trim() } : {}),
+        });
+      }}
+    >
+      <label>
+        <span className="mut">Status</span>
+        <select className="sel" value={to} onChange={(e) => setTo(e.target.value as Status)}>
+          {next.map((st) => (
+            <option key={st} value={st}>
+              {st}
+            </option>
+          ))}
+        </select>
+      </label>
+      {needsReason && (
+        <label style={{ flex: 1 }}>
+          <span className="mut">Reason</span>
+          <input
+            className="inp"
+            maxLength={500}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+        </label>
+      )}
+      {cancelling && (
+        <label>
+          <span className="mut">Type {s.code} to confirm</span>
+          <input
+            className="inp"
+            autoComplete="off"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+          />
+        </label>
+      )}
+      <button
+        className={`btn ${cancelling ? "btn-danger" : "btn-primary"}`}
+        type="submit"
+        disabled={!ready || set.isPending}
+      >
+        {cancelling ? "Cancel school" : "Change status"}
+      </button>
+      <p className="mut fs12" style={{ flexBasis: "100%" }}>
+        {cancelling
+          ? "Cancelling is final: every staff and parent login is refused from their next request, and it can't be undone here."
+          : to === "suspended"
+            ? "Suspended: the portal turns read-only from the next request; units keep logging."
+            : "Takes effect on each login's next request."}
+      </p>
+      {set.error && <p role="alert">{set.error.message}</p>}
+    </form>
+  );
+}
+
+function PackageForm({ s, pkg }: { s: SchoolDetail; pkg: NonNullable<SchoolDetail["package"]> }) {
+  const edit = useEditPackage(s.id, pkg.id);
+  const [start, setStart] = useState(pkg.period_start);
+  const [students, setStudents] = useState(String(pkg.students_committed));
+  const [price, setPrice] = useState(String(pkg.price_per_student_paise / 100));
+  const paise = paiseFromRupees(price);
+  const count = /^\d{1,6}$/.test(students) ? Number(students) : null;
+  return (
+    <form
+      className="row mt16"
+      style={{ gap: 8, alignItems: "end", flexWrap: "wrap" }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (paise === null || count === null) return;
+        edit.mutate({
+          version: pkg.version,
+          period_start: start,
+          students_committed: count,
+          price_per_student_paise: paise,
+        });
+      }}
+    >
+      <label>
+        <span className="mut">Package start</span>
+        <input
+          className="inp"
+          type="date"
+          value={start}
+          onChange={(e) => setStart(e.target.value)}
+        />
+      </label>
+      <label>
+        <span className="mut">Students committed</span>
+        <input
+          className="inp"
+          inputMode="numeric"
+          value={students}
+          onChange={(e) => setStudents(e.target.value)}
+        />
+      </label>
+      <label>
+        <span className="mut">₹ per student (12 months)</span>
+        <input
+          className="inp"
+          inputMode="decimal"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+        />
+      </label>
+      <button
+        className="btn btn-primary"
+        type="submit"
+        disabled={paise === null || count === null || edit.isPending}
+      >
+        Save package
+      </button>
+      <p className="mut fs12" style={{ flexBasis: "100%" }}>
+        {paise !== null && count !== null
+          ? `${count} × ${rupees(paise)} ${s.price_includes_gst ? "(GST incl.)" : "+ GST"}; ends 12 months after the start.`
+          : "Enter whole students and a ₹ amount."}
+      </p>
+      {edit.error && <p role="alert">{edit.error.message}</p>}
+    </form>
   );
 }
