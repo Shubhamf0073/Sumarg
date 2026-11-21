@@ -107,6 +107,12 @@ settled code-SMS rows are deleted by the worker after 24 h (the sealed code is w
   per-school sign-in limit: it would let one attacker close a whole school's login. A cancelled school → 423 after the secret verifies; a suspended school signs in
   read-only. Login revokes any session the client presents for the same school (no fixation); a token for another
   school is left to expire — it is under that school's RLS and can't be fixed onto this one.
+- Set-password links (portal staff): Previa's onboarding wizard creates the owner with an unusable password and a
+  one-time link `https://<APP_DOMAIN>/set-password#<tenant_id>.<token>` (32 random bytes; only sha256 stored in
+  `user_secret_links`; 72 h; single use; a new link for the user spends the older ones). Using it sets the password
+  (10–128 chars), clears the failure counters, ends every session of the user and writes `audit_log`. The link is
+  shown once in /admin and handed to the person directly (their own WhatsApp/SMS), never to a group. School-issued
+  links for their own staff come with M1.5.
 - Support view: Previa support gets a 30-min read-only session (`InTenantReadOnly`), shown in the school's audit.
 
 ## 11. Packages and billing (Previa → school)

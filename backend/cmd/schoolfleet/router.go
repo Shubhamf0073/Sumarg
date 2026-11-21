@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/admin/adminauth"
+	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/admin/schools"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/internal/tenant/auth"
 	"github.com/Shubhamf0073/previa-school-fleet/backend/platform/httpx"
 )
@@ -18,6 +19,7 @@ import (
 func registerAPI(api huma.API) {
 	auth.Register(api)
 	adminauth.Register(api)
+	schools.Register(api)
 }
 
 // mountAPI serves registerAPI's operations on r. main and the isolation walker both use it, so the walker tests
@@ -34,7 +36,7 @@ func mountAPI(r chi.Router, d auth.Deps, a adminauth.Deps) {
 }
 
 // gate picks what runs in front of each operation. Sign-in (portal, PIN, parent OTP) resolves its own tenant from
-// the school code; logout
+// the school code, and set-password from its one-time link; logout
 // needs the session but not the request transaction (a read-only session must still be able to end itself).
 func gate(d auth.Deps, requestTx, admin func(http.Handler) http.Handler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -45,7 +47,7 @@ func gate(d auth.Deps, requestTx, admin func(http.Handler) http.Handler) func(ht
 				return
 			}
 			switch r.URL.Path {
-			case auth.PathLogin, auth.PathPIN, auth.PathOTP, auth.PathOTPVerify:
+			case auth.PathLogin, auth.PathPIN, auth.PathOTP, auth.PathOTPVerify, auth.PathSetPassword:
 				next.ServeHTTP(w, r)
 			case auth.PathLogout:
 				sessionOnly.ServeHTTP(w, r)

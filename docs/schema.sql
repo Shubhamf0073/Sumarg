@@ -281,6 +281,22 @@ CREATE TABLE users (                             -- school staff and crew (not p
         (role NOT IN ('driver','attendant') AND password_hash IS NOT NULL))
 );
 
+-- One-time "set your password" links for portal staff (owner, admin, transport_manager): issued by Previa in the
+-- onboarding wizard (M1.4b) and later by the school (M1.5). The link carries `<tenant_id>.<token>`; only sha256(token)
+-- is stored. 72 h, single use; a new link for the user spends the older ones (docs/05 §10).
+CREATE TABLE user_secret_links (
+    id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    tenant_id    bigint  NOT NULL REFERENCES tenants(id),
+    user_id      bigint  NOT NULL,
+    token_hash   bytea   NOT NULL UNIQUE,
+    expires_at   timestamptz NOT NULL,
+    used_at      timestamptz,
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, id),
+    FOREIGN KEY (tenant_id, user_id) REFERENCES users (tenant_id, id)
+);
+CREATE INDEX user_secret_links_live ON user_secret_links (tenant_id, user_id) WHERE used_at IS NULL;
+
 CREATE TABLE crew (                               -- driver / attendant compliance record (1:1 with a crew user)
     id                    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     tenant_id             bigint  NOT NULL REFERENCES tenants(id),
@@ -880,7 +896,7 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO sf_platform;
 -- sf_app (school portal + apps): no DELETE anywhere. Units, positions, live state and alerts from units are
 -- written by ingest (sf_platform); the app reads them.
 GRANT SELECT, INSERT, UPDATE ON
-    tenant_settings, campuses, users, crew, vehicles, routes, stops, students, rfid_cards, guardians,
+    tenant_settings, campuses, users, user_secret_links, crew, vehicles, routes, stops, students, rfid_cards, guardians,
     student_guardians, sessions, otp_challenges, push_tokens, files, trips, trip_stops, inspections, boardings,
     absences, alerts, incidents, notifications, announcements, requests
     TO sf_app;

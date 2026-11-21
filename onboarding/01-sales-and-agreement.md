@@ -24,6 +24,10 @@ Keep the simulator running (`make sim` against the demo tenant) so buses move du
 1. Tenants → New: legal name, display name, short name (signs notifications), board, GSTIN, state code, address,
    contact; **school code** (short, lowercase, e.g. `dpsbopal`) — it is printed on invites and typed at login.
 2. Package: start date, committed students, price, GST-inclusive flag, agent.
-3. Campuses (or import `campuses.csv`); owner and admin logins (one-time links).
-4. Set `onboarding_stage = setup`, planned `go_live_on`.
+3. Campuses (or import `campuses.csv`); settings; owner login. Steps 1–3 are one wizard in `/admin/schools/new`,
+   saved at once (the school starts at `onboarding_stage = setup`, with the planned `go_live_on` if known). The owner's
+   one-time set-password link (72 h) is shown once: send it to the owner's own mobile. A new link: the school page →
+   "New password link". Extra admin logins come with the school's own users screen (M1.5).
+4. Move the stage on the school page as the school progresses; **go-live day: move to `live`** (an empty
+   `go_live_on` becomes today, IST).
 5. Send the data request (`02-data-collection.md`).

@@ -185,3 +185,41 @@ RETURNING id;
 -- Parent / driver app → push-token registration: one live token per session, so a rotated token isn't pushed twice.
 UPDATE push_tokens SET invalid_at = now()
 WHERE session_id = @session_id AND id <> @keep_id AND invalid_at IS NULL;
+
+-- ── Set-password links (docs/05 §10) ──
+
+-- name: SecretLinkIsLive :one
+-- Set password, read-only, before the new password is hashed: a bogus link costs no Argon2 work.
+SELECT EXISTS (SELECT 1 FROM user_secret_links l JOIN users u ON u.id = l.user_id
+               WHERE l.token_hash = @token_hash AND l.used_at IS NULL AND l.expires_at > now()
+                 AND u.is_active AND u.role IN ('owner','admin','transport_manager'))::boolean;
+
+-- name: UseSecretLink :one
+-- Set password (link from the wizard or a "new password link"): consumes the link once, for an active portal user.
+-- No row → used, replaced, expired, or the user can't sign in to the portal.
+UPDATE user_secret_links l SET used_at = now()
+FROM users u
+WHERE l.token_hash = @token_hash AND l.used_at IS NULL AND l.expires_at > now()
+  AND u.id = l.user_id AND u.is_active AND u.role IN ('owner','admin','transport_manager')
+RETURNING l.id, u.id AS user_id;
+
+-- name: SetStaffPassword :exec
+-- Set password: the new hash; the run of failures and the daily window are cleared (the link proved who it is).
+UPDATE users
+SET password_hash = @password_hash, must_change_secret = false, failed_logins = 0, fail_window_start = NULL,
+    fail_window_count = 0, version = version + 1
+WHERE id = @id;
+
+-- name: SpendSecretLinks :exec
+-- Set password: any other live link for the user stops working.
+UPDATE user_secret_links SET used_at = now() WHERE user_id = @user_id AND used_at IS NULL;
+
+-- name: RevokeUserSessions :exec
+-- Set password: every session of the user ends (a new password signs everyone out).
+UPDATE sessions SET revoked_at = now() WHERE user_id = @user_id AND revoked_at IS NULL;
+
+-- name: InsertAudit :exec
+-- A school-side change, by a user or (no user) by the holder of a one-time link.
+INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id, summary, ip, request_id)
+VALUES (app_tenant(), sqlc.narg(user_id), @action, @entity, sqlc.narg(entity_id), @summary, sqlc.narg(ip),
+        sqlc.narg(request_id));

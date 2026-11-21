@@ -1,12 +1,14 @@
 import { createBrowserRouter, Navigate } from "react-router";
 import { Login } from "./pages/login";
 import { Placeholder } from "./pages/placeholder";
+import { SetPassword } from "./pages/set-password";
 import { NAV } from "./shell/nav";
 import { Shell } from "./shell/shell";
 
 /** School portal at `/`, Previa superadmin at `/admin` (lazy chunk, own shell). */
 export const router = createBrowserRouter([
   { path: "/login", element: <Login /> },
+  { path: "/set-password", element: <SetPassword /> },
   {
     path: "/",
     element: <Shell items={NAV} brand="School Transport" />,

@@ -606,6 +606,16 @@ type User struct {
 	FailWindowCount  int16
 }
 
+type UserSecretLink struct {
+	ID        int64
+	TenantID  int64
+	UserID    int64
+	TokenHash []byte
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+	CreatedAt time.Time
+}
+
 type Vehicle struct {
 	ID              int64
 	TenantID        int64

@@ -67,6 +67,168 @@
         ],
         "type": "object"
       },
+      "CampusIn": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "maxLength": 500,
+            "type": "string"
+          },
+          "code": {
+            "pattern": "^[A-Z0-9]{2,8}$",
+            "type": "string"
+          },
+          "geofence_m": {
+            "default": 150,
+            "format": "int32",
+            "maximum": 1000,
+            "minimum": 30,
+            "type": "integer"
+          },
+          "lat": {
+            "format": "double",
+            "maximum": 90,
+            "minimum": -90,
+            "type": "number"
+          },
+          "lon": {
+            "format": "double",
+            "maximum": 180,
+            "minimum": -180,
+            "type": "number"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "address",
+          "lat",
+          "lon"
+        ],
+        "type": "object"
+      },
+      "CampusRow": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "geofence_m": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "lat": {
+            "format": "double",
+            "type": "number"
+          },
+          "lon": {
+            "format": "double",
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name",
+          "lat",
+          "lon",
+          "geofence_m",
+          "is_active"
+        ],
+        "type": "object"
+      },
+      "CreateBody": {
+        "additionalProperties": false,
+        "properties": {
+          "campuses": {
+            "items": {
+              "$ref": "#/components/schemas/CampusIn"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "owner": {
+            "$ref": "#/components/schemas/OwnerIn"
+          },
+          "package": {
+            "$ref": "#/components/schemas/PackageIn"
+          },
+          "school": {
+            "$ref": "#/components/schemas/SchoolIn"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/SettingsIn"
+          }
+        },
+        "required": [
+          "school",
+          "campuses",
+          "settings",
+          "owner",
+          "package"
+        ],
+        "type": "object"
+      },
+      "CreateOutBody": {
+        "additionalProperties": false,
+        "properties": {
+          "campus_ids": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "code": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "onboarding_stage": {
+            "type": "string"
+          },
+          "owner_link": {
+            "$ref": "#/components/schemas/LinkBody"
+          },
+          "period_end": {
+            "format": "date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "onboarding_stage",
+          "period_end",
+          "owner_link",
+          "campus_ids"
+        ],
+        "type": "object"
+      },
       "EnrolBeginInBody": {
         "additionalProperties": false,
         "properties": {
@@ -113,6 +275,93 @@
         "required": [
           "id",
           "name"
+        ],
+        "type": "object"
+      },
+      "LinkBody": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "url": {
+            "description": "give it to the person over a channel they control; it works once",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "user_id",
+          "url",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "ListOutBody": {
+        "additionalProperties": false,
+        "properties": {
+          "next": {
+            "description": "pass as ?after= for the next page; null = last page",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "schools": {
+            "items": {
+              "$ref": "#/components/schemas/SchoolRow"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "schools",
+          "next"
+        ],
+        "type": "object"
+      },
+      "LoginRow": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "mobile": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "password_set": {
+            "type": "boolean"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "admin"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "mobile",
+          "role",
+          "password_set",
+          "is_active"
         ],
         "type": "object"
       },
@@ -194,6 +443,100 @@
           "mobile",
           "code",
           "install_id"
+        ],
+        "type": "object"
+      },
+      "OwnerIn": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "format": "email",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "mobile": {
+            "pattern": "^[6-9][0-9]{9}$",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "mobile"
+        ],
+        "type": "object"
+      },
+      "PackageIn": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "period_start": {
+            "format": "date",
+            "type": "string"
+          },
+          "price_includes_gst": {
+            "default": true,
+            "type": "boolean"
+          },
+          "price_per_student_paise": {
+            "description": "integer paise; ₹1,000 = 100000",
+            "format": "int64",
+            "maximum": 100000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "students_committed": {
+            "format": "int32",
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "period_start",
+          "students_committed",
+          "price_per_student_paise"
+        ],
+        "type": "object"
+      },
+      "PackageRow": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "period_end": {
+            "format": "date",
+            "type": "string"
+          },
+          "period_start": {
+            "format": "date",
+            "type": "string"
+          },
+          "price_per_student_paise": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "students_committed": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "period_start",
+          "period_end",
+          "students_committed",
+          "price_per_student_paise"
         ],
         "type": "object"
       },
@@ -335,6 +678,420 @@
           "id",
           "code",
           "name"
+        ],
+        "type": "object"
+      },
+      "SchoolDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "board": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "campuses": {
+            "items": {
+              "$ref": "#/components/schemas/CampusRow"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "city": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "contact_mobile": {
+            "type": "string"
+          },
+          "contact_name": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "go_live_on": {
+            "format": "date",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "gstin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "is_demo": {
+            "type": "boolean"
+          },
+          "legal_name": {
+            "type": "string"
+          },
+          "logins": {
+            "items": {
+              "$ref": "#/components/schemas/LoginRow"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "onboarding_stage": {
+            "enum": [
+              "setup",
+              "data",
+              "survey",
+              "install",
+              "training",
+              "live"
+            ],
+            "type": "string"
+          },
+          "package": {
+            "$ref": "#/components/schemas/PackageRow",
+            "description": "null = no active package"
+          },
+          "price_includes_gst": {
+            "type": "boolean"
+          },
+          "short_name": {
+            "type": "string"
+          },
+          "state_code": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "trial",
+              "active",
+              "past_due",
+              "suspended",
+              "cancelled"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "legal_name",
+          "short_name",
+          "board",
+          "gstin",
+          "city",
+          "state_code",
+          "contact_name",
+          "contact_mobile",
+          "price_includes_gst",
+          "agent_id",
+          "campuses",
+          "logins",
+          "package",
+          "id",
+          "code",
+          "display_name",
+          "status",
+          "onboarding_stage",
+          "go_live_on",
+          "is_demo",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "SchoolIn": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "maxLength": 500,
+            "type": "string"
+          },
+          "board": {
+            "enum": [
+              "CBSE",
+              "ICSE",
+              "GSEB",
+              "IB",
+              "IGCSE",
+              "other"
+            ],
+            "type": "string"
+          },
+          "city": {
+            "maxLength": 100,
+            "type": "string"
+          },
+          "code": {
+            "description": "school code, typed at login and printed on invites",
+            "pattern": "^[a-z0-9-]{3,30}$",
+            "type": "string"
+          },
+          "contact_email": {
+            "format": "email",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "contact_mobile": {
+            "pattern": "^[6-9][0-9]{9}$",
+            "type": "string"
+          },
+          "contact_name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "display_name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "go_live_on": {
+            "description": "planned go-live (IST date)",
+            "format": "date",
+            "type": "string"
+          },
+          "gstin": {
+            "pattern": "^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$",
+            "type": "string"
+          },
+          "legal_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "notes": {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "short_name": {
+            "description": "signs notifications",
+            "maxLength": 40,
+            "minLength": 1,
+            "type": "string"
+          },
+          "state_code": {
+            "description": "GST state code, 24 = Gujarat",
+            "pattern": "^[0-9]{2}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "legal_name",
+          "display_name",
+          "short_name",
+          "address",
+          "city",
+          "state_code",
+          "contact_name",
+          "contact_mobile",
+          "notes"
+        ],
+        "type": "object"
+      },
+      "SchoolRow": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "go_live_on": {
+            "format": "date",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "is_demo": {
+            "type": "boolean"
+          },
+          "onboarding_stage": {
+            "enum": [
+              "setup",
+              "data",
+              "survey",
+              "install",
+              "training",
+              "live"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "trial",
+              "active",
+              "past_due",
+              "suspended",
+              "cancelled"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "display_name",
+          "status",
+          "onboarding_stage",
+          "go_live_on",
+          "is_demo",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "SetPasswordInBody": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "maxLength": 128,
+            "minLength": 10,
+            "type": "string"
+          },
+          "token": {
+            "description": "from the link's #fragment",
+            "pattern": "^[1-9][0-9]{0,17}\\.[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "password"
+        ],
+        "type": "object"
+      },
+      "SettingsIn": {
+        "additionalProperties": false,
+        "properties": {
+          "approach_minutes": {
+            "default": 5,
+            "format": "int32",
+            "maximum": 30,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "delay_alert_minutes": {
+            "default": 10,
+            "format": "int32",
+            "maximum": 60,
+            "minimum": 3,
+            "type": "integer"
+          },
+          "photo_on_tap": {
+            "default": true,
+            "type": "boolean"
+          },
+          "photo_retention_days": {
+            "default": 30,
+            "format": "int32",
+            "maximum": 90,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "position_retention_days": {
+            "default": 30,
+            "format": "int32",
+            "maximum": 90,
+            "minimum": 7,
+            "type": "integer"
+          },
+          "sms_fallback": {
+            "default": false,
+            "type": "boolean"
+          },
+          "speed_limit_kmph": {
+            "default": 40,
+            "format": "int32",
+            "maximum": 80,
+            "minimum": 20,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "StageInBody": {
+        "additionalProperties": false,
+        "properties": {
+          "from_stage": {
+            "description": "the stage you saw (409 if it changed)",
+            "enum": [
+              "setup",
+              "data",
+              "survey",
+              "install",
+              "training",
+              "live"
+            ],
+            "type": "string"
+          },
+          "go_live_on": {
+            "description": "omit to keep; moving to live with none set uses today (IST)",
+            "format": "date",
+            "type": "string"
+          },
+          "stage": {
+            "enum": [
+              "setup",
+              "data",
+              "survey",
+              "install",
+              "training",
+              "live"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_stage",
+          "stage"
+        ],
+        "type": "object"
+      },
+      "StageOutBody": {
+        "additionalProperties": false,
+        "properties": {
+          "go_live_on": {
+            "format": "date",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "onboarding_stage": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "onboarding_stage",
+          "go_live_on"
         ],
         "type": "object"
       },
@@ -912,6 +1669,439 @@
         ]
       }
     },
+    "/api/admin/schools": {
+      "get": {
+        "operationId": "schools-list",
+        "parameters": [
+          {
+            "description": "cursor: the last id of the previous page",
+            "explode": false,
+            "in": "query",
+            "name": "after",
+            "schema": {
+              "description": "cursor: the last id of the previous page",
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListOutBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Onboarding board: schools with their stage and go-live date",
+        "tags": [
+          "admin-schools"
+        ]
+      },
+      "post": {
+        "operationId": "schools-create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateOutBody"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Onboarding wizard: school, campuses, settings, owner login and first package in one save",
+        "tags": [
+          "admin-schools"
+        ]
+      }
+    },
+    "/api/admin/schools/{id}": {
+      "get": {
+        "operationId": "schools-get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchoolDetail"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "One school: details, campuses, owner/admin logins, current package",
+        "tags": [
+          "admin-schools"
+        ]
+      }
+    },
+    "/api/admin/schools/{id}/onboarding": {
+      "patch": {
+        "operationId": "schools-set-stage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StageInBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StageOutBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Move a school to another onboarding stage; `live` with no go-live date sets today (IST)",
+        "tags": [
+          "admin-schools"
+        ]
+      }
+    },
+    "/api/admin/schools/{id}/users/{user_id}/password-link": {
+      "post": {
+        "operationId": "schools-password-link",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkBody"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "A new one-time set-password link for a school's owner or admin (older links stop working)",
+        "tags": [
+          "admin-schools"
+        ]
+      }
+    },
     "/api/auth/app/otp": {
       "post": {
         "operationId": "auth-otp",
@@ -1371,6 +2561,89 @@
           }
         },
         "summary": "Parent / driver app: register this install's FCM token for the signed-in session",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/set-password": {
+      "post": {
+        "operationId": "auth-set-password",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Origin",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPasswordInBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Portal staff: set a password from a one-time link (72 h, single use); then sign in as usual",
         "tags": [
           "auth"
         ]

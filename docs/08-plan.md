@@ -43,9 +43,18 @@ and its host tests, Expo app config.
   note in docs/06 that ceremonies are in memory (a restart drops those in progress; a distributed flood can 429 real
   admins for ≤ 5 min); local dev: passkeys work only on `http://localhost:5173` (RP ID `localhost`, not 127.0.0.1,
   not with `APP_DOMAIN` set locally) — force it or document it in the README
-- [ ] M1.4b Onboarding wizard (school, campuses, settings, owner, package) **[review]** — moving a school to `live`
+- [x] M1.4b Onboarding wizard (school, campuses, settings, owner, package) **[review]** — moving a school to `live`
   sets `go_live_on` to today (IST) if empty, in the same save (the OTP launch window, docs/05 §10, M1.3a); routes use
-  `adminauth.Require` per role
+  `adminauth.Require` per role — `internal/admin/schools`: wizard in one platform tx (+ `platform_audit_log`), board,
+  school page, `PATCH …/onboarding` conditional on `from_stage`, new password link; owner gets an unusable password +
+  one-time set-password link (`user_secret_links`, 00006, approved option A: sha256 only, 72 h, single use) →
+  `POST /api/auth/set-password` (link checked read-only before Argon2, ends the user's sessions); write = superadmin +
+  support, read = + billing, installer; portal `/admin/schools{,/new,/:id}` + `/set-password`
+- [ ] M1.4d Wizard follow-ups (M1.4b review): read-only platform tx for admin GETs (`InPlatformReadOnly`); decide
+  whether stages may move backwards and whether going `live` with a *future* planned `go_live_on` should take today
+  (the 14-day OTP window starts from the stored date); map other constraint violations (e.g. owner mobile) to 4xx;
+  Nginx `sf_login` zone on `/api/auth/set-password` (production infra — ask first); school status changes and
+  package edits (billing role)
 - [ ] M1.5 School setup screens: campuses, vehicles, crew, users
 
 ### M2 — Routes, students, cards (2.5 d)

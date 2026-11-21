@@ -233,6 +233,36 @@ func (q *Queries) GuardianForLogin(ctx context.Context, mobile string) (Guardian
 	return i, err
 }
 
+const insertAudit = `-- name: InsertAudit :exec
+INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id, summary, ip, request_id)
+VALUES (app_tenant(), $1, $2, $3, $4, $5, $6,
+        $7)
+`
+
+type InsertAuditParams struct {
+	UserID    *int64
+	Action    string
+	Entity    string
+	EntityID  *int64
+	Summary   string
+	Ip        *netip.Addr
+	RequestID *string
+}
+
+// A school-side change, by a user or (no user) by the holder of a one-time link.
+func (q *Queries) InsertAudit(ctx context.Context, arg InsertAuditParams) error {
+	_, err := q.db.Exec(ctx, insertAudit,
+		arg.UserID,
+		arg.Action,
+		arg.Entity,
+		arg.EntityID,
+		arg.Summary,
+		arg.Ip,
+		arg.RequestID,
+	)
+	return err
+}
+
 const knownDriverInstall = `-- name: KnownDriverInstall :one
 SELECT EXISTS (SELECT 1 FROM sessions
                WHERE user_id = $1 AND client = 'driver_app' AND install_id = $2)::boolean
@@ -382,6 +412,55 @@ func (q *Queries) RevokeSessionByHash(ctx context.Context, tokenHash []byte) err
 	return err
 }
 
+const revokeUserSessions = `-- name: RevokeUserSessions :exec
+UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL
+`
+
+// Set password: every session of the user ends (a new password signs everyone out).
+func (q *Queries) RevokeUserSessions(ctx context.Context, userID *int64) error {
+	_, err := q.db.Exec(ctx, revokeUserSessions, userID)
+	return err
+}
+
+const secretLinkIsLive = `-- name: SecretLinkIsLive :one
+
+SELECT EXISTS (SELECT 1 FROM user_secret_links l JOIN users u ON u.id = l.user_id
+               WHERE l.token_hash = $1 AND l.used_at IS NULL AND l.expires_at > now()
+                 AND u.is_active AND u.role IN ('owner','admin','transport_manager'))::boolean
+`
+
+// ── Set-password links (docs/05 §10) ──
+// Set password, read-only, before the new password is hashed: a bogus link costs no Argon2 work.
+func (q *Queries) SecretLinkIsLive(ctx context.Context, tokenHash []byte) (bool, error) {
+	row := q.db.QueryRow(ctx, secretLinkIsLive, tokenHash)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const setStaffPassword = `-- name: SetStaffPassword :exec
+UPDATE users
+SET password_hash = $1, must_change_secret = false, failed_logins = 0, fail_window_start = NULL,
+    fail_window_count = 0, version = version + 1
+WHERE id = $2
+`
+
+// Set password: the new hash; the run of failures and the daily window are cleared (the link proved who it is).
+func (q *Queries) SetStaffPassword(ctx context.Context, passwordHash *string, iD int64) error {
+	_, err := q.db.Exec(ctx, setStaffPassword, passwordHash, iD)
+	return err
+}
+
+const spendSecretLinks = `-- name: SpendSecretLinks :exec
+UPDATE user_secret_links SET used_at = now() WHERE user_id = $1 AND used_at IS NULL
+`
+
+// Set password: any other live link for the user stops working.
+func (q *Queries) SpendSecretLinks(ctx context.Context, userID int64) error {
+	_, err := q.db.Exec(ctx, spendSecretLinks, userID)
+	return err
+}
+
 const staffForLogin = `-- name: StaffForLogin :one
 SELECT id, name, role, campus_id, password_hash, pin_hash, must_change_secret, failed_logins, is_active
 FROM users
@@ -494,4 +573,26 @@ func (q *Queries) UpsertPushToken(ctx context.Context, sessionID int64, platform
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const useSecretLink = `-- name: UseSecretLink :one
+UPDATE user_secret_links l SET used_at = now()
+FROM users u
+WHERE l.token_hash = $1 AND l.used_at IS NULL AND l.expires_at > now()
+  AND u.id = l.user_id AND u.is_active AND u.role IN ('owner','admin','transport_manager')
+RETURNING l.id, u.id AS user_id
+`
+
+type UseSecretLinkRow struct {
+	ID     int64
+	UserID int64
+}
+
+// Set password (link from the wizard or a "new password link"): consumes the link once, for an active portal user.
+// No row → used, replaced, expired, or the user can't sign in to the portal.
+func (q *Queries) UseSecretLink(ctx context.Context, tokenHash []byte) (UseSecretLinkRow, error) {
+	row := q.db.QueryRow(ctx, useSecretLink, tokenHash)
+	var i UseSecretLinkRow
+	err := row.Scan(&i.ID, &i.UserID)
+	return i, err
 }

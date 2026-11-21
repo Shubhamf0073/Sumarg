@@ -32,6 +32,7 @@ const (
 
 // Register adds the auth operations (docs/04 "Auth (all clients)").
 func Register(api huma.API) {
+	registerSetPassword(api)
 	huma.Register(api, huma.Operation{
 		OperationID: "auth-login", Method: http.MethodPost, Path: PathLogin, Tags: []string{"auth"},
 		Summary: "Portal sign-in: school code, mobile and password → session cookie",

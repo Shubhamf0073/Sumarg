@@ -22,6 +22,7 @@ import (
 	"net/netip"
 	"slices"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/jackc/pgx/v5"
@@ -128,6 +129,35 @@ func depsFrom(ctx context.Context) (Deps, error) {
 		return Deps{}, errors.New("adminauth: Deps not provided (mount adminauth.Middleware)")
 	}
 	return d, nil
+}
+
+// Platform is the platform-pool transaction runner for /api/admin services (internal/admin/*): they name the tenant
+// in every query. Only available behind Middleware.
+func Platform(ctx context.Context) (InPlatform, error) {
+	d, err := depsFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return d.DB, nil
+}
+
+// PortalOrigin is where links for school staff point (the first configured portal origin, APP_DOMAIN in production).
+func PortalOrigin(ctx context.Context) (string, error) {
+	d, err := depsFrom(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(d.Origins) == 0 {
+		return "", errors.New("adminauth: no portal origin configured")
+	}
+	return d.Origins[0], nil
+}
+
+// ClientIP is the admin's address for audit rows (X-Forwarded-For only from TrustedProxies).
+func ClientIP(ctx huma.Context) *netip.Addr {
+	var c client
+	c.resolve(ctx)
+	return c.ip
 }
 
 // ── principal ──

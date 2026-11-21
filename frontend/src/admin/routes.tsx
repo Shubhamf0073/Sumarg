@@ -2,6 +2,8 @@ import { Navigate, Route, Routes } from "react-router";
 import { Placeholder } from "../pages/placeholder";
 import { AdminEnrol } from "./enrol";
 import { AdminLogin } from "./login";
+import { SchoolWizard } from "./school-new";
+import { SchoolPage, SchoolsBoard } from "./schools";
 import { AdminShell } from "./shell";
 
 const ADMIN_NAV = [
@@ -18,7 +20,10 @@ export function AdminRoutes() {
       <Route path="enrol" element={<AdminEnrol />} />
       <Route element={<AdminShell items={ADMIN_NAV} />}>
         <Route index element={<Navigate to="schools" replace />} />
-        {ADMIN_NAV.map((n) => (
+        <Route path="schools" element={<SchoolsBoard />} />
+        <Route path="schools/new" element={<SchoolWizard />} />
+        <Route path="schools/:id" element={<SchoolPage />} />
+        {ADMIN_NAV.filter((n) => n.to !== "/admin/schools").map((n) => (
           <Route
             key={n.to}
             path={n.to.replace("/admin/", "")}

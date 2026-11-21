@@ -46,6 +46,16 @@ export function useLogin() {
   });
 }
 
+/** Set a password from a one-time link (`<tenant_id>.<token>` from the URL fragment). */
+export function useSetPassword() {
+  return useMutation({
+    mutationFn: async (body: { token: string; password: string }) => {
+      const { error, response } = await api.POST("/api/auth/set-password", { body });
+      if (!response.ok) throw new Error(error?.message ?? "Could not set the password.");
+    },
+  });
+}
+
 export function useLogout() {
   const qc = useQueryClient();
   return useMutation({
