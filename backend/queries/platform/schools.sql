@@ -91,14 +91,16 @@ WHERE tenant_id = @tenant_id AND role IN ('owner','admin')
 ORDER BY id;
 
 -- name: SetOnboardingStage :one
--- Onboarding board → move a school. Conditional on the stage the admin saw (0 rows → 409). go_live_on: the date
--- given, else the one already set; moving to `live` with neither sets today in IST, in this same statement, which
--- is what opens the 14-day OTP launch window (docs/05 §10, OTPIssueCounts).
+-- Onboarding board → move a school, forwards or back (leaving `live` is refused in Go). Conditional on the stage the
+-- admin saw (0 rows → 409). go_live_on: the date given, else the one already set. Moving to `live` stores at most
+-- today in IST, in this same statement — going live means live now, and that date opens the 14-day OTP launch
+-- window (docs/05 §10, OTPIssueCounts): with neither date, or a future one, it is today; a past one is kept.
 UPDATE tenants SET
     onboarding_stage = @stage,
     go_live_on = CASE
         WHEN @stage::text = 'live'
-            THEN COALESCE(sqlc.narg(go_live_on)::date, go_live_on, (now() AT TIME ZONE 'Asia/Kolkata')::date)
+            THEN LEAST(COALESCE(sqlc.narg(go_live_on)::date, go_live_on, (now() AT TIME ZONE 'Asia/Kolkata')::date),
+                       (now() AT TIME ZONE 'Asia/Kolkata')::date)
         ELSE COALESCE(sqlc.narg(go_live_on)::date, go_live_on)
     END,
     updated_at = now()
@@ -111,3 +113,31 @@ INSERT INTO platform_audit_log (platform_user_id, actor_name, action, tenant_id,
                                 ip, request_id)
 VALUES (@platform_user_id, @actor_name, @action, @tenant_id, @entity, @entity_id, @summary, sqlc.narg(changes),
         sqlc.narg(ip), sqlc.narg(request_id));
+
+-- name: GetSchoolLogin :one
+-- School page → cancel link / deactivate: the owner/admin login of this school (no row → 404).
+SELECT id, is_active FROM users
+WHERE tenant_id = @tenant_id AND id = @user_id AND role IN ('owner','admin');
+
+-- name: CancelUserSecretLinks :execrows
+-- School page → "cancel link": the user's unused links stop working, and no new one is issued (a link sent to the
+-- wrong person). Spent links are marked used, so set-password answers 410 like any used link.
+UPDATE user_secret_links SET used_at = now()
+WHERE tenant_id = @tenant_id AND user_id = @user_id AND used_at IS NULL AND expires_at > now();
+
+-- name: DeactivateSchoolLogin :execrows
+-- School page → "deactivate": an active owner/admin login of this school can no longer sign in (0 rows → 404/409).
+UPDATE users SET is_active = false, version = version + 1
+WHERE tenant_id = @tenant_id AND id = @user_id AND role IN ('owner','admin') AND is_active;
+
+-- name: RevokeUserSessions :execrows
+-- School page → "deactivate": end every live session of the user, same transaction.
+UPDATE sessions SET revoked_at = now()
+WHERE tenant_id = @tenant_id AND user_id = @user_id AND revoked_at IS NULL;
+
+-- name: ReactivateSchoolLogin :execrows
+-- School page → "reactivate with a new link": an inactive owner/admin login of this school comes back with an
+-- unusable password (whoever set the old one can't use it again) until the new one-time link is used (0 rows →
+-- 404/409).
+UPDATE users SET is_active = true, password_hash = @password_hash, must_change_secret = true, version = version + 1
+WHERE tenant_id = @tenant_id AND id = @user_id AND role IN ('owner','admin') AND NOT is_active;

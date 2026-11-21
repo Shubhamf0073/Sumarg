@@ -80,7 +80,9 @@ type InPlatform func(ctx context.Context, fn func(pgx.Tx) error) error
 // Deps is what the admin auth endpoints and the session check need. main builds one; Middleware puts it in every
 // /api/admin request's context, so registering the operations (and `schoolfleet openapi`) needs no database.
 type Deps struct {
-	DB       InPlatform
+	DB InPlatform
+	// DBRead is DB in a READ ONLY transaction (platformdb.InPlatformReadOnly) for GET handlers.
+	DBRead   InPlatform
 	WebAuthn *webauthn.WebAuthn
 	// Origins accepted on sign-in and on cookie writes (config.PortalOrigins: /admin is served from the same host).
 	Origins []string
@@ -96,13 +98,13 @@ type Deps struct {
 
 // NewDeps fills the parts of Deps that hold state: the WebAuthn relying party (rpID is the bare host, "localhost"
 // locally), the ceremony store and the per-address limit (30 ceremony steps per 10 minutes).
-func NewDeps(db InPlatform, rpID string, origins []string, sessionHours int, trusted []netip.Prefix,
+func NewDeps(db, dbRead InPlatform, rpID string, origins []string, sessionHours int, trusted []netip.Prefix,
 	c clock.Clock) (Deps, error) {
 	wa, err := NewWebAuthn(rpID, origins)
 	if err != nil {
 		return Deps{}, err
 	}
-	return Deps{DB: db, WebAuthn: wa, Origins: origins, SessionHours: sessionHours, TrustedProxies: trusted,
+	return Deps{DB: db, DBRead: dbRead, WebAuthn: wa, Origins: origins, SessionHours: sessionHours, TrustedProxies: trusted,
 		Ceremonies: NewCeremonies(c), Limit: ratelimit.New(c, 30, ceremonyWindow)}, nil
 }
 
@@ -139,6 +141,18 @@ func Platform(ctx context.Context) (InPlatform, error) {
 		return nil, err
 	}
 	return d.DB, nil
+}
+
+// PlatformReadOnly is Platform in a READ ONLY transaction: /api/admin GET services use it.
+func PlatformReadOnly(ctx context.Context) (InPlatform, error) {
+	d, err := depsFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if d.DBRead == nil {
+		return nil, errors.New("adminauth: Deps.DBRead not set")
+	}
+	return d.DBRead, nil
 }
 
 // PortalOrigin is where links for school staff point (the first configured portal origin, APP_DOMAIN in production).

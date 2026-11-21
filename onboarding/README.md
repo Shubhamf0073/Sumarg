@@ -33,7 +33,9 @@ Start stage 3 the day the agreement is signed.
   the detail.
 - **Go-live day: set the stage to `live` and `go_live_on` together.** The parent sign-in SMS limit stays raised
   (60/min instead of 10) until 14 days after `go_live_on` (docs/05 §10). A `live` school with no date drops to
-  10/min on launch day, and a school never moved to `live` keeps 60/min.
+  10/min on launch day, and a school never moved to `live` keeps 60/min. Moving to `live` stores at most today:
+  a planned date still in the future becomes today, a past one is kept. Stages may move back (e.g. `install` →
+  `survey`), but a `live` school stays `live` — manage it through its status.
 
 ## When to go live
 School years in Gujarat start in June; schools change transport arrangements at the start of the year and after

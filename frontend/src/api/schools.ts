@@ -99,3 +99,49 @@ export function useNewPasswordLink(schoolId: number) {
     },
   });
 }
+
+/** Cancel a login's unused set-password links without issuing a new one (a link sent to the wrong person). */
+export function useCancelPasswordLink(schoolId: number) {
+  return useMutation({
+    mutationFn: async (userId: number) => {
+      const { error, response } = await api.DELETE(
+        "/api/admin/schools/{id}/users/{user_id}/password-link",
+        { params: { path: { id: schoolId, user_id: userId } } },
+      );
+      if (error || !response.ok)
+        fail(response.status, error?.message, "Could not cancel the link.");
+    },
+  });
+}
+
+/** Deactivate a school login: it can't sign in, its sessions end and its links stop working. */
+export function useDeactivateLogin(schoolId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (userId: number) => {
+      const { error, response } = await api.POST(
+        "/api/admin/schools/{id}/users/{user_id}/deactivate",
+        { params: { path: { id: schoolId, user_id: userId } } },
+      );
+      if (error || !response.ok)
+        fail(response.status, error?.message, "Could not deactivate the login.");
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: SCHOOLS }),
+  });
+}
+
+/** Reactivate a login with a new one-time link; the old password no longer works. */
+export function useReactivateLogin(schoolId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (userId: number) => {
+      const { data, error, response } = await api.POST(
+        "/api/admin/schools/{id}/users/{user_id}/reactivate",
+        { params: { path: { id: schoolId, user_id: userId } } },
+      );
+      if (error || !data) fail(response.status, error?.message, "Could not reactivate the login.");
+      return data;
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: SCHOOLS }),
+  });
+}

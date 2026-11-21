@@ -159,6 +159,14 @@ func TestReadOnlyTransactionRejectsWrites(t *testing.T) {
 	if !isCode(err, "25006") { // read_only_sql_transaction
 		t.Fatalf("write in read-only tx: want 25006, got %v", err)
 	}
+	// The platform pool bypasses RLS, so its read-only tx (/api/admin GETs) matters even more.
+	err = platformdb.InPlatformReadOnly(ctx, f.platform, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "UPDATE tenants SET notes = notes WHERE id = $1", f.t2)
+		return err
+	})
+	if !isCode(err, "25006") {
+		t.Fatalf("write in read-only platform tx: want 25006, got %v", err)
+	}
 }
 
 func TestSessionLookupNeedsTheRightTenant(t *testing.T) {

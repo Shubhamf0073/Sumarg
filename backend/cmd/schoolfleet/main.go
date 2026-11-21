@@ -97,6 +97,9 @@ func setup(ctx context.Context, cfg config.Config, log *slog.Logger) (*app.Runti
 	inPlatform := func(ctx context.Context, fn func(pgx.Tx) error) error {
 		return platformdb.InPlatform(ctx, platPool, fn)
 	}
+	inPlatformRead := func(ctx context.Context, fn func(pgx.Tx) error) error {
+		return platformdb.InPlatformReadOnly(ctx, platPool, fn)
+	}
 	device, err := auth.NewDeviceKeys(cfg.SecretsKey.Reveal(), clock.System{})
 	if err != nil {
 		return fail(err)
@@ -110,7 +113,7 @@ func setup(ctx context.Context, cfg config.Config, log *slog.Logger) (*app.Runti
 	if rpID == "" {
 		rpID = "localhost" // APP_ENV=local (validated): the Vite dev origin
 	}
-	admin, err := adminauth.NewDeps(inPlatform, rpID, cfg.PortalOrigins(), cfg.AdminSessionHours,
+	admin, err := adminauth.NewDeps(inPlatform, inPlatformRead, rpID, cfg.PortalOrigins(), cfg.AdminSessionHours,
 		cfg.TrustedProxyPrefixes(), clock.System{})
 	if err != nil {
 		return fail(err)

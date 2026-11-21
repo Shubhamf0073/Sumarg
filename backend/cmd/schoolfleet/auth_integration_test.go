@@ -109,7 +109,10 @@ func newAuthEnv(t *testing.T) (*authEnv, school, school) {
 		t.Fatal(err)
 	}
 	inPlat := func(ctx context.Context, fn func(pgx.Tx) error) error { return platformdb.InPlatform(ctx, plat, fn) }
-	admin, err := adminauth.NewDeps(inPlat, testRPID, []string{testOrigin}, 12, nil, fake)
+	inPlatRead := func(ctx context.Context, fn func(pgx.Tx) error) error {
+		return platformdb.InPlatformReadOnly(ctx, plat, fn)
+	}
+	admin, err := adminauth.NewDeps(inPlat, inPlatRead, testRPID, []string{testOrigin}, 12, nil, fake)
 	if err != nil {
 		t.Fatal(err)
 	}

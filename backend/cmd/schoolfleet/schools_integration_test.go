@@ -212,15 +212,19 @@ func TestSchoolWizardRefusals(t *testing.T) {
 	}
 }
 
-// Moving to live sets go_live_on to today (IST) only if it is empty; the stage the admin saw must still hold.
+// Moving to live stores at most today (IST): no date or a future one → today, a past one is kept. Stages may move
+// back, but not out of live; the stage the admin saw must still hold.
 func TestSchoolStageLive(t *testing.T) {
 	e, _, _ := newAuthEnv(t)
 	sup := e.adminAs(t, adminauth.RoleSupport)
 	plain := e.do(t, adminCall(sup, http.MethodPost, schools.PathSchools, wizardBody(newCode())))
 	plannedBody := wizardBody(newCode())
-	plannedBody["school"].(map[string]any)["go_live_on"] = "2026-12-01"
+	plannedBody["school"].(map[string]any)["go_live_on"] = "2099-12-01"
 	planned := e.do(t, adminCall(sup, http.MethodPost, schools.PathSchools, plannedBody))
-	for _, r := range []resp{plain, planned} {
+	pastBody := wizardBody(newCode())
+	pastBody["school"].(map[string]any)["go_live_on"] = "2026-01-05"
+	past := e.do(t, adminCall(sup, http.MethodPost, schools.PathSchools, pastBody))
+	for _, r := range []resp{plain, planned, past} {
 		if r.code != http.StatusCreated {
 			t.Fatalf("create: %d %s", r.code, r.raw)
 		}
@@ -241,17 +245,29 @@ func TestSchoolStageLive(t *testing.T) {
 	}
 	var today string
 	e.q(t, `SELECT ((now() AT TIME ZONE 'Asia/Kolkata')::date)::text`, &today)
+	if r := move(id(plain), "data", "survey"); r.code != http.StatusOK {
+		t.Fatalf("data→survey: %d %s", r.code, r.raw)
+	}
+	if r := move(id(plain), "survey", "data"); r.code != http.StatusOK || r.body["onboarding_stage"] != "data" {
+		t.Fatalf("survey→data (back): %d %s", r.code, r.raw)
+	}
 	if r := move(id(plain), "data", "live"); r.code != http.StatusOK || r.body["go_live_on"] != today {
 		t.Fatalf("→live with no date: %d %s (today IST %s)", r.code, r.raw, today)
 	}
-	if r := move(id(planned), "setup", "live"); r.code != http.StatusOK || r.body["go_live_on"] != "2026-12-01" {
-		t.Fatalf("→live keeps the set date: %d %s", r.code, r.raw)
+	if r := move(id(plain), "live", "training"); r.code != http.StatusUnprocessableEntity || r.body["code"] != "stage_live" {
+		t.Fatalf("out of live: %d %s", r.code, r.raw)
+	}
+	if r := move(id(planned), "setup", "live"); r.code != http.StatusOK || r.body["go_live_on"] != today {
+		t.Fatalf("→live with a future date takes today: %d %s (today IST %s)", r.code, r.raw, today)
+	}
+	if r := move(id(past), "setup", "live"); r.code != http.StatusOK || r.body["go_live_on"] != "2026-01-05" {
+		t.Fatalf("→live keeps a past date: %d %s", r.code, r.raw)
 	}
 	var n int
 	e.q(t, `SELECT count(*) FROM platform_audit_log WHERE tenant_id = $1 AND action = 'school.stage_changed'`, &n,
 		id(plain))
-	if n != 2 {
-		t.Fatalf("stage audit rows = %d, want 2", n)
+	if n != 4 {
+		t.Fatalf("stage audit rows = %d, want 4", n)
 	}
 }
 
@@ -360,5 +376,135 @@ func TestSetPasswordRevokesAndExpires(t *testing.T) {
 		WHERE tenant_id = $1 AND used_at IS NULL`, id(a))
 	if r := e.do(t, setPasswordCall(linkToken(t, ex), "third password")); r.code != http.StatusGone {
 		t.Fatalf("expired link: %d %s", r.code, r.raw)
+	}
+}
+
+// Cancelling a link spends it without a new one; deactivating a login ends its sessions and its links. Neither
+// touches the other school; another school's user under this school's id is 404; only writers may.
+func TestSchoolLoginCancelAndDeactivate(t *testing.T) {
+	e, _, _ := newAuthEnv(t)
+	sup := e.adminAs(t, adminauth.RoleSupport)
+	codeA := newCode()
+	a := e.do(t, adminCall(sup, http.MethodPost, schools.PathSchools, wizardBody(codeA)))
+	b := e.do(t, adminCall(sup, http.MethodPost, schools.PathSchools, wizardBody(newCode())))
+	if a.code != http.StatusCreated || b.code != http.StatusCreated {
+		t.Fatalf("create: %d %d", a.code, b.code)
+	}
+	ownerA := int64(a.body["owner_link"].(map[string]any)["user_id"].(float64))
+	ownerB := int64(b.body["owner_link"].(map[string]any)["user_id"].(float64))
+	linkPath := func(school, user int64) string {
+		return schoolPath(school, fmt.Sprintf("/users/%d/password-link", user))
+	}
+	deactPath := func(school, user int64) string { return schoolPath(school, fmt.Sprintf("/users/%d/deactivate", user)) }
+
+	// Roles: billing and installers can't; another school's user is 404.
+	for _, role := range []string{adminauth.RoleBilling, adminauth.RoleInstaller} {
+		c := e.adminAs(t, role)
+		if r := e.do(t, adminCall(c, http.MethodDelete, linkPath(id(a), ownerA), nil)); r.code != http.StatusForbidden {
+			t.Fatalf("%s cancel: %d", role, r.code)
+		}
+		if r := e.do(t, adminCall(c, http.MethodPost, deactPath(id(a), ownerA), nil)); r.code != http.StatusForbidden {
+			t.Fatalf("%s deactivate: %d", role, r.code)
+		}
+	}
+	if r := e.do(t, adminCall(sup, http.MethodDelete, linkPath(id(a), ownerB), nil)); r.code != http.StatusNotFound {
+		t.Fatalf("cancel B's user under A: %d %s", r.code, r.raw)
+	}
+	if r := e.do(t, adminCall(sup, http.MethodPost, deactPath(id(a), ownerB), nil)); r.code != http.StatusNotFound {
+		t.Fatalf("deactivate B's user under A: %d %s", r.code, r.raw)
+	}
+
+	// Cancel: A's link stops working; B's still works.
+	if r := e.do(t, adminCall(sup, http.MethodDelete, linkPath(id(a), ownerA), nil)); r.code != http.StatusNoContent {
+		t.Fatalf("cancel: %d %s", r.code, r.raw)
+	}
+	if r := e.do(t, setPasswordCall(linkToken(t, a), "a long password")); r.code != http.StatusGone {
+		t.Fatalf("cancelled link: %d", r.code)
+	}
+	if r := e.do(t, setPasswordCall(linkToken(t, b), "b long password")); r.code != http.StatusNoContent {
+		t.Fatalf("B's link after A's cancel: %d %s", r.code, r.raw)
+	}
+
+	// A new link for A, used; the owner signs in. Then a further link is issued and left unused.
+	re := e.do(t, adminCall(sup, http.MethodPost, linkPath(id(a), ownerA), nil))
+	if r := e.do(t, setPasswordCall(linkToken(t, re), "a long password")); r.code != http.StatusNoContent {
+		t.Fatalf("new link: %d %s", r.code, r.raw)
+	}
+	login := e.do(t, portalLoginCall(codeA, newOwnerMobile, "a long password"))
+	if login.code != http.StatusOK {
+		t.Fatalf("login: %d %s", login.code, login.raw)
+	}
+	sid := cookie(t, login, auth.SessionCookie)
+	pending := e.do(t, adminCall(sup, http.MethodPost, linkPath(id(a), ownerA), nil))
+
+	// Deactivate A's owner: session ends, sign-in and the pending link refused; B's owner unaffected.
+	if r := e.do(t, adminCall(sup, http.MethodPost, deactPath(id(a), ownerA), nil)); r.code != http.StatusNoContent {
+		t.Fatalf("deactivate: %d %s", r.code, r.raw)
+	}
+	if r := e.do(t, call{method: http.MethodGet, path: auth.PathMe, cookies: []*http.Cookie{sid}}); r.code != http.StatusUnauthorized {
+		t.Fatalf("session after deactivate: %d", r.code)
+	}
+	if r := e.do(t, portalLoginCall(codeA, newOwnerMobile, "a long password")); r.code != http.StatusUnauthorized {
+		t.Fatalf("login after deactivate: %d", r.code)
+	}
+	if r := e.do(t, setPasswordCall(linkToken(t, pending), "c long password")); r.code != http.StatusGone {
+		t.Fatalf("pending link after deactivate: %d", r.code)
+	}
+	if r := e.do(t, adminCall(sup, http.MethodPost, deactPath(id(a), ownerA), nil)); r.code != http.StatusConflict ||
+		r.body["code"] != "user_inactive" {
+		t.Fatalf("deactivate twice: %d %s", r.code, r.raw)
+	}
+	var revoked, active int
+	e.q(t, `SELECT count(*) FROM sessions WHERE tenant_id = $1 AND user_id = $2 AND revoked_at IS NULL`, &revoked,
+		id(a), ownerA)
+	e.q(t, `SELECT count(*) FROM users WHERE tenant_id = $1 AND is_active`, &active, id(b))
+	if revoked != 0 || active != 1 {
+		t.Fatalf("A live sessions = %d, B active users = %d", revoked, active)
+	}
+	if r := e.do(t, portalLoginCall(b.body["code"].(string), newOwnerMobile, "b long password")); r.code != http.StatusOK {
+		t.Fatalf("B login: %d %s", r.code, r.raw)
+	}
+	g := e.do(t, adminCall(sup, http.MethodGet, schoolPath(id(a), ""), nil))
+	if l := g.body["logins"].([]any); len(l) != 1 || l[0].(map[string]any)["is_active"] != false {
+		t.Fatalf("school page after deactivate: %s", g.raw)
+	}
+
+	// Reactivate: the old password stays dropped; only the new link gets the owner back in.
+	reactPath := schoolPath(id(a), fmt.Sprintf("/users/%d/reactivate", ownerA))
+	if r := e.do(t, adminCall(e.adminAs(t, adminauth.RoleBilling), http.MethodPost, reactPath, nil)); r.code != http.StatusForbidden {
+		t.Fatalf("billing reactivate: %d", r.code)
+	}
+	if r := e.do(t, adminCall(sup, http.MethodPost, schoolPath(id(a), fmt.Sprintf("/users/%d/reactivate", ownerB)),
+		nil)); r.code != http.StatusNotFound {
+		t.Fatalf("reactivate B's user under A: %d", r.code)
+	}
+	back := e.do(t, adminCall(sup, http.MethodPost, reactPath, nil))
+	if back.code != http.StatusCreated {
+		t.Fatalf("reactivate: %d %s", back.code, back.raw)
+	}
+	if r := e.do(t, portalLoginCall(codeA, newOwnerMobile, "a long password")); r.code != http.StatusUnauthorized {
+		t.Fatalf("old password after reactivate: %d", r.code)
+	}
+	if r := e.do(t, adminCall(sup, http.MethodPost, reactPath, nil)); r.code != http.StatusConflict ||
+		r.body["code"] != "user_active" {
+		t.Fatalf("reactivate twice: %d %s", r.code, r.raw)
+	}
+	if r := e.do(t, setPasswordCall(linkToken(t, back), "the right owner")); r.code != http.StatusNoContent {
+		t.Fatalf("link after reactivate: %d %s", r.code, r.raw)
+	}
+	if r := e.do(t, portalLoginCall(codeA, newOwnerMobile, "the right owner")); r.code != http.StatusOK {
+		t.Fatalf("login after reactivate: %d %s", r.code, r.raw)
+	}
+	for action, want := range map[string]int{"user.password_link_cancelled": 1, "user.deactivated": 1,
+		"user.reactivated": 1} {
+		var n int
+		e.q(t, `SELECT count(*) FROM platform_audit_log WHERE tenant_id = $1 AND action = $2`, &n, id(a), action)
+		if n != want {
+			t.Fatalf("A %s audit rows = %d, want %d", action, n, want)
+		}
+		e.q(t, `SELECT count(*) FROM platform_audit_log WHERE tenant_id = $1 AND action = $2`, &n, id(b), action)
+		if n != 0 {
+			t.Fatalf("B %s audit rows = %d", action, n)
+		}
 	}
 }

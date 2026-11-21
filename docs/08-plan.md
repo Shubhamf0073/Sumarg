@@ -50,12 +50,14 @@ and its host tests, Expo app config.
   one-time set-password link (`user_secret_links`, 00006, approved option A: sha256 only, 72 h, single use) →
   `POST /api/auth/set-password` (link checked read-only before Argon2, ends the user's sessions); write = superadmin +
   support, read = + billing, installer; portal `/admin/schools{,/new,/:id}` + `/set-password`
-- [ ] M1.4d Wizard follow-ups (M1.4b review): read-only platform tx for admin GETs (`InPlatformReadOnly`); decide
-  whether stages may move backwards and whether going `live` with a *future* planned `go_live_on` should take today
-  (the 14-day OTP window starts from the stored date); map other constraint violations (e.g. owner mobile) to 4xx;
-  Nginx `sf_login` zone on `/api/auth/set-password` (production infra — ask first); school status changes and
-  package edits (billing role); cancel a user's live set-password links without issuing a new one, and deactivate a
-  school login from /admin (ends its sessions; audited) for a link sent to the wrong person
+- [x] M1.4d Wizard follow-ups (M1.4b review): admin GETs in a READ ONLY platform tx (`InPlatformReadOnly`); stages
+  may move back but not out of `live` (422 `stage_live`); `live` stores at most today IST (a future planned date →
+  today); wizard constraint violations → 409 `duplicate` / 422 `mobile_invalid` / `value_invalid`; Nginx `sf_login`
+  zone on `/api/auth/set-password`; cancel a login's unused set-password links (DELETE) and deactivate a school
+  login from /admin (sessions ended, links spent; audited), reactivate it with a new link (old password dropped) so
+  a school's only owner is never locked out
+- [ ] M1.4e Billing in /admin: school status changes (conditional on `from_status`, allowed transitions) and package
+  edits (billing role, audited)
 - [ ] M1.5 School setup screens: campuses, vehicles, crew, users
 
 ### M2 — Routes, students, cards (2.5 d)

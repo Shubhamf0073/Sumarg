@@ -77,6 +77,12 @@ server {
         include /etc/nginx/snippets/schoolfleet-proxy.conf;
     }
 
+    # One-time set-password links (docs/05 §10): the token is 32 random bytes, so this only caps Argon2 work.
+    location = /api/auth/set-password {
+        limit_req zone=sf_login burst=5 nodelay;
+        include /etc/nginx/snippets/schoolfleet-proxy.conf;
+    }
+
     # ── Previa superadmin (optional IP allow-list in schoolfleet-admin-allow.conf) ──
     location /api/admin/ {
         include /etc/nginx/snippets/schoolfleet-admin-allow.conf;

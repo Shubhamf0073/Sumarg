@@ -23,6 +23,8 @@ const (
 	PathSchool     = "/api/admin/schools/{id}"
 	PathOnboarding = "/api/admin/schools/{id}/onboarding"
 	PathUserLink   = "/api/admin/schools/{id}/users/{user_id}/password-link"
+	PathDeactivate = "/api/admin/schools/{id}/users/{user_id}/deactivate"
+	PathReactivate = "/api/admin/schools/{id}/users/{user_id}/reactivate"
 )
 
 // Who may do what. Superadmin always may (adminauth.Require).
@@ -53,8 +55,9 @@ func Register(api huma.API) {
 	}, get)
 	huma.Register(api, huma.Operation{
 		OperationID: "schools-set-stage", Method: http.MethodPatch, Path: PathOnboarding, Tags: tags,
-		Summary: "Move a school to another onboarding stage; `live` with no go-live date sets today (IST)",
-		Errors:  []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict},
+		Summary: "Move a school to another onboarding stage (back too, but not out of `live`); `live` stores at most today (IST)",
+		Errors: []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict,
+			http.StatusUnprocessableEntity},
 	}, setStage)
 	huma.Register(api, huma.Operation{
 		OperationID: "schools-password-link", Method: http.MethodPost, Path: PathUserLink, Tags: tags,
@@ -62,6 +65,24 @@ func Register(api huma.API) {
 		DefaultStatus: http.StatusCreated,
 		Errors:        []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound},
 	}, passwordLink)
+	huma.Register(api, huma.Operation{
+		OperationID: "schools-cancel-password-link", Method: http.MethodDelete, Path: PathUserLink, Tags: tags,
+		Summary:       "Cancel a school login's unused set-password links without issuing a new one",
+		DefaultStatus: http.StatusNoContent,
+		Errors:        []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound},
+	}, cancelPasswordLink)
+	huma.Register(api, huma.Operation{
+		OperationID: "schools-deactivate-login", Method: http.MethodPost, Path: PathDeactivate, Tags: tags,
+		Summary:       "Deactivate a school's owner/admin login: its sessions end and its links stop working",
+		DefaultStatus: http.StatusNoContent,
+		Errors:        []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict},
+	}, deactivate)
+	huma.Register(api, huma.Operation{
+		OperationID: "schools-reactivate-login", Method: http.MethodPost, Path: PathReactivate, Tags: tags,
+		Summary:       "Reactivate a deactivated owner/admin login: old password dropped, a new one-time link returned",
+		DefaultStatus: http.StatusCreated,
+		Errors:        []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict},
+	}, reactivate)
 }
 
 // ── shapes ──
@@ -276,7 +297,7 @@ type stageIn struct {
 	Body struct {
 		FromStage string  `json:"from_stage" enum:"setup,data,survey,install,training,live" doc:"the stage you saw (409 if it changed)"`
 		Stage     string  `json:"stage" enum:"setup,data,survey,install,training,live"`
-		GoLiveOn  *string `json:"go_live_on,omitempty" format:"date" doc:"omit to keep; moving to live with none set uses today (IST)"`
+		GoLiveOn  *string `json:"go_live_on,omitempty" format:"date" doc:"omit to keep; moving to live stores this or the set date, but at most today (IST)"`
 	}
 	ip *netip.Addr
 }
@@ -320,6 +341,40 @@ func passwordLink(ctx context.Context, in *linkIn) (*linkOut, error) {
 		return nil, err
 	}
 	l, err := reissueLink(ctx, p, in.ip, in.ID, in.UserID)
+	if err != nil {
+		return nil, err
+	}
+	return &linkOut{Body: *l}, nil
+}
+
+func cancelPasswordLink(ctx context.Context, in *linkIn) (*struct{}, error) {
+	p, err := adminauth.Require(ctx, writers...)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := cancelLinks(ctx, p, in.ip, in.ID, in.UserID); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+func deactivate(ctx context.Context, in *linkIn) (*struct{}, error) {
+	p, err := adminauth.Require(ctx, writers...)
+	if err != nil {
+		return nil, err
+	}
+	if err := deactivateLogin(ctx, p, in.ip, in.ID, in.UserID); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+func reactivate(ctx context.Context, in *linkIn) (*linkOut, error) {
+	p, err := adminauth.Require(ctx, writers...)
+	if err != nil {
+		return nil, err
+	}
+	l, err := reactivateLogin(ctx, p, in.ip, in.ID, in.UserID)
 	if err != nil {
 		return nil, err
 	}

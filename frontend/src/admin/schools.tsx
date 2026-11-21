@@ -5,8 +5,11 @@ import {
   type SchoolDetail,
   STAGES,
   type Stage,
+  useCancelPasswordLink,
+  useDeactivateLogin,
   useMoveStage,
   useNewPasswordLink,
+  useReactivateLogin,
   useSchool,
   useSchools,
 } from "../api/schools";
@@ -127,7 +130,6 @@ export function SchoolPage() {
 
 function SchoolView({ s }: { s: SchoolDetail }) {
   const move = useMoveStage(s.id);
-  const newLink = useNewPasswordLink(s.id);
   const [to, setTo] = useState<Stage>(s.onboarding_stage);
   const [goLive, setGoLive] = useState(s.go_live_on ?? "");
   const pkg = s.package as SchoolDetail["package"] | null;
@@ -198,42 +200,15 @@ function SchoolView({ s }: { s: SchoolDetail }) {
             </button>
           </form>
           <p className="mut fs12 mt8">
-            Moving to Live with no date sets today. Parent sign-in SMS stay at 60/min until 14 days
+            Moving to Live sets the go-live date to today unless an earlier one is set. Stages can
+            move back, but a live school stays live. Parent sign-in SMS stay at 60/min until 14 days
             after go-live.
           </p>
           {move.error && <p role="alert">{move.error.message}</p>}
         </div>
       </section>
 
-      <section className="card mt16">
-        <div className="card-h">
-          <span className="card-t">Owner and admin logins</span>
-        </div>
-        <table className="tbl">
-          <tbody>
-            {(s.logins ?? []).map((u) => (
-              <tr key={u.id}>
-                <td>{u.name}</td>
-                <td>{u.role}</td>
-                <td>{u.mobile}</td>
-                <td>{u.password_set ? "password set" : "waiting for the link"}</td>
-                <td>
-                  <button
-                    className="btn btn-sm btn-outline"
-                    type="button"
-                    disabled={newLink.isPending || !u.is_active}
-                    onClick={() => newLink.mutate(u.id)}
-                  >
-                    New password link
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {newLink.error && <p role="alert">{newLink.error.message}</p>}
-        {newLink.data && <OneTimeLink link={newLink.data} />}
-      </section>
+      <Logins s={s} />
 
       <section className="card mt16">
         <div className="card-h">
@@ -258,5 +233,137 @@ function SchoolView({ s }: { s: SchoolDetail }) {
         </div>
       </section>
     </>
+  );
+}
+
+type LoginAction = "cancel" | "deactivate";
+
+/** Owner/admin logins: new link, cancel a link sent to the wrong person, deactivate / reactivate (all audited). */
+function Logins({ s }: { s: SchoolDetail }) {
+  const newLink = useNewPasswordLink(s.id);
+  const cancel = useCancelPasswordLink(s.id);
+  const deactivate = useDeactivateLogin(s.id);
+  const reactivate = useReactivateLogin(s.id);
+  // Destructive actions are confirmed inline (no browser dialog): the row shows Confirm / Keep.
+  const [confirm, setConfirm] = useState<{ userId: number; action: LoginAction } | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+  const busy =
+    newLink.isPending || cancel.isPending || deactivate.isPending || reactivate.isPending;
+  const error = newLink.error ?? cancel.error ?? deactivate.error ?? reactivate.error;
+  const link = reactivate.data ?? newLink.data;
+
+  const run = (userId: number, action: LoginAction) => {
+    setConfirm(null);
+    setDone(null);
+    const m = action === "cancel" ? cancel : deactivate;
+    m.mutate(userId, {
+      onSuccess: () =>
+        setDone(
+          action === "cancel"
+            ? "Link cancelled. Make a new one when you have the right number."
+            : "Login deactivated: signed out everywhere and its links stopped.",
+        ),
+    });
+  };
+
+  return (
+    <section className="card mt16">
+      <div className="card-h">
+        <span className="card-t">Owner and admin logins</span>
+      </div>
+      <table className="tbl">
+        <tbody>
+          {(s.logins ?? []).map((u) => (
+            <tr key={u.id}>
+              <td>{u.name}</td>
+              <td>{u.role}</td>
+              <td>{u.mobile}</td>
+              <td>
+                {!u.is_active ? (
+                  <span className="bd bd-gray">deactivated</span>
+                ) : u.password_set ? (
+                  "password set"
+                ) : (
+                  "waiting for the link"
+                )}
+              </td>
+              <td>
+                {confirm?.userId === u.id ? (
+                  <span className="row" style={{ gap: 6 }}>
+                    <span className="fs12">
+                      {confirm.action === "cancel"
+                        ? "Cancel the unused link?"
+                        : "Deactivate? They are signed out everywhere."}
+                    </span>
+                    <button
+                      className="btn btn-sm btn-danger"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => run(u.id, confirm.action)}
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      className="btn btn-sm btn-outline"
+                      type="button"
+                      onClick={() => setConfirm(null)}
+                    >
+                      Keep
+                    </button>
+                  </span>
+                ) : u.is_active ? (
+                  <span className="row" style={{ gap: 6 }}>
+                    <button
+                      className="btn btn-sm btn-outline"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        setDone(null);
+                        reactivate.reset();
+                        newLink.mutate(u.id);
+                      }}
+                    >
+                      New password link
+                    </button>
+                    <button
+                      className="btn btn-sm btn-outline"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => setConfirm({ userId: u.id, action: "cancel" })}
+                    >
+                      Cancel link
+                    </button>
+                    <button
+                      className="btn btn-sm btn-outline"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => setConfirm({ userId: u.id, action: "deactivate" })}
+                    >
+                      Deactivate
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    className="btn btn-sm btn-outline"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setDone(null);
+                      newLink.reset();
+                      reactivate.mutate(u.id);
+                    }}
+                  >
+                    Reactivate with a new link
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {error && <p role="alert">{error.message}</p>}
+      {done && <p className="mut mt8">{done}</p>}
+      {link && <OneTimeLink link={link} />}
+    </section>
   );
 }

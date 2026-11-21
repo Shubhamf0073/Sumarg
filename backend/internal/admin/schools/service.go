@@ -39,7 +39,16 @@ var (
 		"Two campuses have the same code.")
 	errAgent = httpx.NewError(http.StatusUnprocessableEntity, "agent_invalid",
 		"That agent doesn't exist or is inactive.")
-	errDate = httpx.NewError(http.StatusUnprocessableEntity, "date_invalid", "A date is not valid (YYYY-MM-DD).")
+	errDate      = httpx.NewError(http.StatusUnprocessableEntity, "date_invalid", "A date is not valid (YYYY-MM-DD).")
+	errLeaveLive = httpx.NewError(http.StatusUnprocessableEntity, "stage_live",
+		"A live school stays live. Change its status instead.")
+	errUserInactive = httpx.NewError(http.StatusConflict, "user_inactive", "This login is already deactivated.")
+	errUserActive   = httpx.NewError(http.StatusConflict, "user_active", "This login is already active.")
+	errMobile       = httpx.NewError(http.StatusUnprocessableEntity, "mobile_invalid",
+		"A mobile number is not valid (10 digits starting 6–9).")
+	errValue = httpx.NewError(http.StatusUnprocessableEntity, "value_invalid",
+		"One of the values isn't accepted. Check the form and try again.")
+	errDuplicate = httpx.NewError(http.StatusConflict, "duplicate", "Something with these details already exists.")
 )
 
 // hashSem keeps Argon2 (19 MiB, ~50 ms) to two at a time (.claude/rules/backend.md).
@@ -174,7 +183,7 @@ func createSchool(ctx context.Context, p *adminauth.Principal, ip *netip.Addr, b
 }
 
 func listSchools(ctx context.Context, after int64) ([]SchoolRow, *int64, error) {
-	inPlatform, err := adminauth.Platform(ctx)
+	inPlatform, err := adminauth.PlatformReadOnly(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -201,7 +210,7 @@ func listSchools(ctx context.Context, after int64) ([]SchoolRow, *int64, error) 
 }
 
 func getSchool(ctx context.Context, id int64) (*SchoolDetail, error) {
-	inPlatform, err := adminauth.Platform(ctx)
+	inPlatform, err := adminauth.PlatformReadOnly(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -256,10 +265,14 @@ func getSchool(ctx context.Context, id int64) (*SchoolDetail, error) {
 	return &d, nil
 }
 
-// moveStage changes the onboarding stage if it is still from. Moving to `live` with no date sets today (IST) in the
-// same statement: that is what opens (and later closes) the parent OTP launch window (docs/05 §10).
+// moveStage changes the onboarding stage if it is still from; stages may move back, but a live school stays live
+// (moving it back would reopen the parent OTP launch window). Moving to `live` stores at most today (IST) in the same
+// statement: that date opens (and 14 days later closes) the launch window (docs/05 §10).
 func moveStage(ctx context.Context, p *adminauth.Principal, ip *netip.Addr, id int64, from, to string,
 	goLiveIn *string) (string, *string, error) {
+	if from == "live" && to != "live" {
+		return "", nil, errLeaveLive
+	}
 	goLive, err := optDate(goLiveIn)
 	if err != nil {
 		return "", nil, err
@@ -332,6 +345,118 @@ func reissueLink(ctx context.Context, p *adminauth.Principal, ip *netip.Addr, te
 	return &out, nil
 }
 
+// cancelLinks spends a school login's unused set-password links without issuing a new one (a link sent to the wrong
+// person). It returns how many were still live.
+func cancelLinks(ctx context.Context, p *adminauth.Principal, ip *netip.Addr, tenantID, userID int64) (int64, error) {
+	inPlatform, err := adminauth.Platform(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var n int64
+	err = inPlatform(ctx, func(tx pgx.Tx) error {
+		q := platformq.New(tx)
+		if _, err := q.GetSchoolLogin(ctx, tenantID, userID); errors.Is(err, pgx.ErrNoRows) {
+			return errUserNotFound
+		} else if err != nil {
+			return err
+		}
+		if n, err = q.CancelUserSecretLinks(ctx, tenantID, userID); err != nil {
+			return err
+		}
+		return audit(ctx, q, p, ip, tenantID, "user.password_link_cancelled", "user", userID,
+			"Cancelled the set-password link(s) without issuing a new one", map[string]any{"links": n})
+	})
+	return n, err
+}
+
+// deactivateLogin stops a school's owner/admin login signing in: is_active off, every session ended and every unused
+// link spent, in one transaction. reactivateLogin brings it back with a new link.
+func deactivateLogin(ctx context.Context, p *adminauth.Principal, ip *netip.Addr, tenantID, userID int64) error {
+	inPlatform, err := adminauth.Platform(ctx)
+	if err != nil {
+		return err
+	}
+	return inPlatform(ctx, func(tx pgx.Tx) error {
+		q := platformq.New(tx)
+		n, err := q.DeactivateSchoolLogin(ctx, tenantID, userID)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			if _, err := q.GetSchoolLogin(ctx, tenantID, userID); errors.Is(err, pgx.ErrNoRows) {
+				return errUserNotFound
+			} else if err != nil {
+				return err
+			}
+			return errUserInactive
+		}
+		sessions, err := q.RevokeUserSessions(ctx, tenantID, &userID)
+		if err != nil {
+			return err
+		}
+		links, err := q.CancelUserSecretLinks(ctx, tenantID, userID)
+		if err != nil {
+			return err
+		}
+		return audit(ctx, q, p, ip, tenantID, "user.deactivated", "user", userID,
+			"Deactivated a school login (sessions ended, links cancelled)",
+			map[string]any{"sessions_revoked": sessions, "links_cancelled": links})
+	})
+}
+
+// reactivateLogin turns a deactivated owner/admin login back on with an unusable password and a new one-time link,
+// in one transaction: a school whose only owner was deactivated (a link used by the wrong person) gets a way back
+// in, and the password the wrong person set doesn't come back with it.
+func reactivateLogin(ctx context.Context, p *adminauth.Principal, ip *netip.Addr, tenantID, userID int64) (*LinkBody,
+	error) {
+	inPlatform, err := adminauth.Platform(ctx)
+	if err != nil {
+		return nil, err
+	}
+	origin, err := adminauth.PortalOrigin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pwHash, err := unusableHash(ctx)
+	if err != nil {
+		return nil, err
+	}
+	token, tokenHash, err := adminauth.NewToken()
+	if err != nil {
+		return nil, err
+	}
+	var out LinkBody
+	err = inPlatform(ctx, func(tx pgx.Tx) error {
+		q := platformq.New(tx)
+		n, err := q.ReactivateSchoolLogin(ctx, &pwHash, tenantID, userID)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			if _, err := q.GetSchoolLogin(ctx, tenantID, userID); errors.Is(err, pgx.ErrNoRows) {
+				return errUserNotFound
+			} else if err != nil {
+				return err
+			}
+			return errUserActive
+		}
+		if err := q.SpendUserSecretLinks(ctx, tenantID, userID); err != nil {
+			return err
+		}
+		l, err := q.CreateSecretLink(ctx, tokenHash, LinkHours, tenantID, userID)
+		if err != nil {
+			return err
+		}
+		out = LinkBody{UserID: userID, URL: linkURL(origin, tenantID, token), ExpiresAt: l.ExpiresAt}
+		return audit(ctx, q, p, ip, tenantID, "user.reactivated", "user", userID,
+			"Reactivated a school login with a new set-password link (old password dropped)", nil)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // linkURL is the portal's set-password page with `<tenant_id>.<token>` in the fragment (never sent to the server
 // or logged by Nginx; the page posts it).
 func linkURL(origin string, tenantID int64, token string) string {
@@ -354,8 +479,9 @@ func audit(ctx context.Context, q *platformq.Queries, p *adminauth.Principal, ip
 	})
 }
 
-// dbError maps the constraint violations a wizard save can hit; anything else keeps only SQLSTATE and constraint
-// (PgError.Detail can quote row values).
+// dbError maps the constraint violations a wizard save can hit to 4xx (the request validation should catch most
+// first; Postgres is the backstop). Responses never carry PgError.Detail (it can quote row values) or constraint
+// names; anything unexpected keeps only SQLSTATE and constraint, for the 500's log line.
 func dbError(err error) error {
 	var pg *pgconn.PgError
 	if !errors.As(err, &pg) {
@@ -366,6 +492,17 @@ func dbError(err error) error {
 		return errCodeTaken
 	case pg.Code == "23505" && pg.ConstraintName == "campuses_tenant_id_code_key":
 		return errCampusDup
+	case pg.Code == "23505":
+		return errDuplicate
+	case pg.Code == "23503" && pg.ConstraintName == "tenants_agent_id_fkey":
+		return errAgent
+	case pg.Code == "23514" && (pg.ConstraintName == "users_mobile_check" ||
+		pg.ConstraintName == "tenants_contact_mobile_check"):
+		return errMobile
+	case pg.Code == "23514":
+		return errValue
+	case pg.Code == "22007" || pg.Code == "22008": // invalid / out-of-range date
+		return errDate
 	}
 	return fmt.Errorf("schools: sqlstate %s constraint %q", pg.Code, pg.ConstraintName)
 }

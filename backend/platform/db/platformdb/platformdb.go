@@ -24,3 +24,9 @@ func Open(ctx context.Context, url config.Secret, o db.Options) (*pgxpool.Pool, 
 func InPlatform(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) error) error {
 	return pgx.BeginTxFunc(ctx, pool, pgx.TxOptions{}, fn)
 }
+
+// InPlatformReadOnly is InPlatform in a READ ONLY transaction: Postgres itself rejects any write. /api/admin GET
+// handlers use it, so a read screen can't change a school even by mistake (BYPASSRLS makes that matter more).
+func InPlatformReadOnly(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) error) error {
+	return pgx.BeginTxFunc(ctx, pool, pgx.TxOptions{AccessMode: pgx.ReadOnly}, fn)
+}

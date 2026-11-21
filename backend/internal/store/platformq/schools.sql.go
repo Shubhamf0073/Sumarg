@@ -29,6 +29,21 @@ func (q *Queries) AgentIsActive(ctx context.Context, id int64) (bool, error) {
 	return is_active, err
 }
 
+const cancelUserSecretLinks = `-- name: CancelUserSecretLinks :execrows
+UPDATE user_secret_links SET used_at = now()
+WHERE tenant_id = $1 AND user_id = $2 AND used_at IS NULL AND expires_at > now()
+`
+
+// School page → "cancel link": the user's unused links stop working, and no new one is issued (a link sent to the
+// wrong person). Spent links are marked used, so set-password answers 410 like any used link.
+func (q *Queries) CancelUserSecretLinks(ctx context.Context, tenantID int64, userID int64) (int64, error) {
+	result, err := q.db.Exec(ctx, cancelUserSecretLinks, tenantID, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const createCampus = `-- name: CreateCampus :one
 INSERT INTO campuses (tenant_id, code, name, address, lat, lon, geofence_m)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -247,6 +262,20 @@ func (q *Queries) CreateTenantSettings(ctx context.Context, arg CreateTenantSett
 	return err
 }
 
+const deactivateSchoolLogin = `-- name: DeactivateSchoolLogin :execrows
+UPDATE users SET is_active = false, version = version + 1
+WHERE tenant_id = $1 AND id = $2 AND role IN ('owner','admin') AND is_active
+`
+
+// School page → "deactivate": an active owner/admin login of this school can no longer sign in (0 rows → 404/409).
+func (q *Queries) DeactivateSchoolLogin(ctx context.Context, tenantID int64, userID int64) (int64, error) {
+	result, err := q.db.Exec(ctx, deactivateSchoolLogin, tenantID, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getSchool = `-- name: GetSchool :one
 SELECT id, code, legal_name, display_name, short_name, board, gstin, address, city, state_code, contact_name,
        contact_mobile, contact_email, status, onboarding_stage, go_live_on, is_demo, price_per_student_paise,
@@ -306,6 +335,24 @@ func (q *Queries) GetSchool(ctx context.Context, id int64) (GetSchoolRow, error)
 		&i.AgentID,
 		&i.CreatedAt,
 	)
+	return i, err
+}
+
+const getSchoolLogin = `-- name: GetSchoolLogin :one
+SELECT id, is_active FROM users
+WHERE tenant_id = $1 AND id = $2 AND role IN ('owner','admin')
+`
+
+type GetSchoolLoginRow struct {
+	ID       int64
+	IsActive bool
+}
+
+// School page → cancel link / deactivate: the owner/admin login of this school (no row → 404).
+func (q *Queries) GetSchoolLogin(ctx context.Context, tenantID int64, userID int64) (GetSchoolLoginRow, error) {
+	row := q.db.QueryRow(ctx, getSchoolLogin, tenantID, userID)
+	var i GetSchoolLoginRow
+	err := row.Scan(&i.ID, &i.IsActive)
 	return i, err
 }
 
@@ -510,12 +557,43 @@ func (q *Queries) ListSchools(ctx context.Context, after int64, lim int32) ([]Li
 	return items, nil
 }
 
+const reactivateSchoolLogin = `-- name: ReactivateSchoolLogin :execrows
+UPDATE users SET is_active = true, password_hash = $1, must_change_secret = true, version = version + 1
+WHERE tenant_id = $2 AND id = $3 AND role IN ('owner','admin') AND NOT is_active
+`
+
+// School page → "reactivate with a new link": an inactive owner/admin login of this school comes back with an
+// unusable password (whoever set the old one can't use it again) until the new one-time link is used (0 rows →
+// 404/409).
+func (q *Queries) ReactivateSchoolLogin(ctx context.Context, passwordHash *string, tenantID int64, userID int64) (int64, error) {
+	result, err := q.db.Exec(ctx, reactivateSchoolLogin, passwordHash, tenantID, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const revokeUserSessions = `-- name: RevokeUserSessions :execrows
+UPDATE sessions SET revoked_at = now()
+WHERE tenant_id = $1 AND user_id = $2 AND revoked_at IS NULL
+`
+
+// School page → "deactivate": end every live session of the user, same transaction.
+func (q *Queries) RevokeUserSessions(ctx context.Context, tenantID int64, userID *int64) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeUserSessions, tenantID, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setOnboardingStage = `-- name: SetOnboardingStage :one
 UPDATE tenants SET
     onboarding_stage = $1,
     go_live_on = CASE
         WHEN $1::text = 'live'
-            THEN COALESCE($2::date, go_live_on, (now() AT TIME ZONE 'Asia/Kolkata')::date)
+            THEN LEAST(COALESCE($2::date, go_live_on, (now() AT TIME ZONE 'Asia/Kolkata')::date),
+                       (now() AT TIME ZONE 'Asia/Kolkata')::date)
         ELSE COALESCE($2::date, go_live_on)
     END,
     updated_at = now()
@@ -528,9 +606,10 @@ type SetOnboardingStageRow struct {
 	GoLiveOn        pgtype.Date
 }
 
-// Onboarding board → move a school. Conditional on the stage the admin saw (0 rows → 409). go_live_on: the date
-// given, else the one already set; moving to `live` with neither sets today in IST, in this same statement, which
-// is what opens the 14-day OTP launch window (docs/05 §10, OTPIssueCounts).
+// Onboarding board → move a school, forwards or back (leaving `live` is refused in Go). Conditional on the stage the
+// admin saw (0 rows → 409). go_live_on: the date given, else the one already set. Moving to `live` stores at most
+// today in IST, in this same statement — going live means live now, and that date opens the 14-day OTP launch
+// window (docs/05 §10, OTPIssueCounts): with neither date, or a future one, it is today; a past one is kept.
 func (q *Queries) SetOnboardingStage(ctx context.Context, stage string, goLiveOn pgtype.Date, iD int64, fromStage string) (SetOnboardingStageRow, error) {
 	row := q.db.QueryRow(ctx, setOnboardingStage,
 		stage,
